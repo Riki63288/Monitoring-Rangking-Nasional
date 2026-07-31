@@ -7,6 +7,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js"></script>
+<script src="js/supabase-config.js"></script>
+<script src="js/supabase-service.js"></script>
 <style>
 /* =====================================================
    DESIGN TOKENS — mengikuti referensi Website Monitoring
@@ -1084,6 +1087,23 @@ select:focus,input:focus{outline:2px solid var(--gold);outline-offset:1px;}
 
 .dt-table.has-grouped-header th.dt-sticky-end,.dt-table.has-grouped-header td.dt-sticky-end{box-shadow:6px 0 9px -8px rgba(31,41,55,.78)!important;}
 
+.runtime-badge{display:inline-flex;align-items:center;gap:6px;height:29px;padding:0 10px;border-radius:16px;font-size:11px;font-weight:800;white-space:nowrap;border:1px solid var(--card-border);}
+.runtime-badge.viewer{background:#eef6ff;color:#245a94;border-color:#c9dff3;}
+.runtime-badge.admin{background:#fff5d7;color:#805f00;border-color:#e9d591;}
+.runtime-badge.cache{background:#fff0eb;color:#9a3d26;border-color:#f0c5b8;}
+.runtime-badge .dot{width:7px;height:7px;border-radius:50%;background:currentColor;}
+.topbar-auth-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
+.login-form{display:grid;gap:13px;margin-top:4px;}
+.login-form label{display:grid;gap:6px;font-size:12px;font-weight:700;color:var(--ink-soft);}
+.login-form input{width:100%;}
+.form-error{min-height:18px;color:var(--red);font-size:12px;font-weight:700;}
+.publication-summary{display:grid;grid-template-columns:minmax(140px,1fr) minmax(180px,1.5fr);gap:8px 14px;margin:12px 0 16px;padding:14px;border:1px solid var(--card-border);border-radius:10px;background:var(--bg-soft);font-size:12px;}
+.publication-summary dt{font-weight:800;color:var(--ink-soft);}
+.publication-summary dd{margin:0;word-break:break-word;color:var(--ink);}
+.public-data-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;padding:11px 14px;border:1px solid #c9dff3;border-radius:10px;background:#f3f8fd;color:#245a94;font-size:12px;}
+.public-data-banner.cache-source{border-color:#f0c5b8;background:#fff6f2;color:#8f3e28;}
+.publication-history-actions{display:flex;justify-content:flex-end;gap:7px;}
+@media (max-width:1100px){.topbar-auth-actions{width:100%;order:100;}.publication-summary{grid-template-columns:1fr;}}
 
 </style>
 </head>
@@ -1115,10 +1135,11 @@ const APP_CONFIG = {
   SHEET_NAME_FALLBACK_KEYWORDS: ['detail', 'persalesman', 'salesman'],
   HEADER_MARKER_TEXT: 'KODE SALESMAN',
   DB_NAME: 'RankingKPI_DB',
-  DB_VERSION: 3,
+  DB_VERSION: 4,
   STORE_SNAPSHOTS: 'snapshots',
   STORE_VACANT: 'vacantSalesmen',
   STORE_MASTER_CABANG: 'masterCabang',
+  STORE_VIEWER_CACHE: 'viewerCache',
   CURRENT_DATA_SCHEMA_VERSION: 2,
   CURRENT_HIT_RATE_SOURCE: 'totalCallEsuite',
   CURRENT_HIT_RATE_FORMULA_VERSION: 'avgEc_div_totalCallEsuite_v1',
@@ -1227,6 +1248,14 @@ function getFinalScoreCategory(score) { return APP_CONFIG.FINAL_SCORE_CATEGORIES
    GLOBAL STATE
    ============================================================ */
 const State = {
+  runtimeMode: 'viewer',
+  authSession: null,
+  isAdmin: false,
+  supabaseReady: false,
+  remotePublication: null,
+  remoteSource: null,
+  remoteStatusMessage: '',
+  publicationBusy: false,
   settings: null,
   activeSnapshot: null,
   validation: null,
@@ -1622,6 +1651,9 @@ const Storage = (() => {
         if (!db.objectStoreNames.contains(APP_CONFIG.STORE_MASTER_CABANG)) {
           db.createObjectStore(APP_CONFIG.STORE_MASTER_CABANG, { keyPath: 'id' });
         }
+        if (!db.objectStoreNames.contains(APP_CONFIG.STORE_VIEWER_CACHE)) {
+          db.createObjectStore(APP_CONFIG.STORE_VIEWER_CACHE, { keyPath: 'id' });
+        }
       };
       req.onsuccess = (e) => resolve(e.target.result);
       req.onerror = (e) => reject(e.target.error || new Error('Gagal membuka IndexedDB'));
@@ -1710,7 +1742,16 @@ const Storage = (() => {
     const store = await tx(APP_CONFIG.STORE_MASTER_CABANG, 'readonly');
     return new Promise((resolve, reject) => { const r = store.get('active'); r.onsuccess = () => resolve(r.result || null); r.onerror = (e) => reject(e.target.error); });
   }
-  return { saveSnapshot, saveAndActivateSnapshot, listSnapshots, getSnapshot, deleteSnapshot, setActiveSnapshot, getActiveSnapshot, saveSettings, getSettings, listVacantSalesmen, putVacantSalesmen, deleteVacantSalesman, clearVacantSalesmen, saveMasterCabang, getMasterCabang };
+  async function saveViewerCache(payload, remoteMeta) {
+    const store = await tx(APP_CONFIG.STORE_VIEWER_CACHE, 'readwrite');
+    const record = { id: 'active', payload, remoteMeta: remoteMeta || {}, cachedAt: Date.now() };
+    return new Promise((resolve, reject) => { const r = store.put(record); r.onsuccess = () => resolve(record); r.onerror = (e) => reject(e.target.error); });
+  }
+  async function getViewerCache() {
+    const store = await tx(APP_CONFIG.STORE_VIEWER_CACHE, 'readonly');
+    return new Promise((resolve, reject) => { const r = store.get('active'); r.onsuccess = () => resolve(r.result || null); r.onerror = (e) => reject(e.target.error); });
+  }
+  return { saveSnapshot, saveAndActivateSnapshot, listSnapshots, getSnapshot, deleteSnapshot, setActiveSnapshot, getActiveSnapshot, saveSettings, getSettings, listVacantSalesmen, putVacantSalesmen, deleteVacantSalesman, clearVacantSalesmen, saveMasterCabang, getMasterCabang, saveViewerCache, getViewerCache };
 })();
 
 // LocalStorage: hanya untuk preferensi ringan (bukan dataset)
@@ -2260,25 +2301,56 @@ function comparisonEntityKey(level, row) {
   if (level === 'salesman') return getSalesmanComparisonKey(row.rec || {});
   return '';
 }
+function getSnapshotRevisionNumber(snapshot) {
+  const revisionNumber = Number(snapshot && snapshot.revisionNumber);
+  return Number.isInteger(revisionNumber) && revisionNumber > 0 ? revisionNumber : 1;
+}
+function getNextLocalRevisionNumber(cutoffDate) {
+  const snapshots = Array.isArray(State.snapshotList) ? State.snapshotList : [];
+  let maxRevisionNumber = 0;
+  snapshots.forEach(snapshot => {
+    if (!snapshot || snapshot.cutoffDate !== cutoffDate) return;
+    maxRevisionNumber = Math.max(maxRevisionNumber, getSnapshotRevisionNumber(snapshot));
+  });
+  const nextRevisionNumber = maxRevisionNumber > 0 ? maxRevisionNumber + 1 : 1;
+  return Number.isInteger(nextRevisionNumber) && nextRevisionNumber > 0 ? nextRevisionNumber : 1;
+}
 function snapshotDateValue(snapshot) {
-  const value = snapshot && snapshot.cutoffDate ? Date.parse(`${snapshot.cutoffDate}T00:00:00`) : NaN;
-  return Number.isFinite(value) ? value : NaN;
+  const cutoffDate = String(snapshot && snapshot.cutoffDate ? snapshot.cutoffDate : '');
+  const match = cutoffDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return NaN;
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const date = new Date(year, monthIndex, day);
+  const value = date.getTime();
+  if (!Number.isFinite(value)) return NaN;
+  return date.getFullYear() === year && date.getMonth() === monthIndex && date.getDate() === day ? value : NaN;
+}
+function snapshotUploadedAtValue(snapshot) {
+  const value = Number(snapshot && snapshot.uploadedAt);
+  return Number.isFinite(value) ? value : 0;
 }
 function selectPreviousComparisonSnapshot(activeSnapshot) {
   if (!activeSnapshot) return null;
   const activeDate = snapshotDateValue(activeSnapshot);
   if (!Number.isFinite(activeDate)) return null;
-  const candidates = (State.snapshotList || []).filter(snapshot => {
+  const activeRevisionNumber = getSnapshotRevisionNumber(activeSnapshot);
+  const snapshots = Array.isArray(State.snapshotList) ? State.snapshotList : [];
+  const candidates = snapshots.filter(snapshot => {
     if (!snapshot || snapshot.id === activeSnapshot.id || isLegacyHitRateSnapshot(snapshot)) return false;
-    const date = snapshotDateValue(snapshot);
-    return Number.isFinite(date) && date < activeDate;
+    const candidateDate = snapshotDateValue(snapshot);
+    if (!Number.isFinite(candidateDate)) return false;
+    if (candidateDate < activeDate) return true;
+    if (candidateDate > activeDate) return false;
+    return getSnapshotRevisionNumber(snapshot) < activeRevisionNumber;
   });
   candidates.sort((a, b) => {
     const dateDiff = snapshotDateValue(b) - snapshotDateValue(a);
     if (dateDiff) return dateDiff;
-    const revDiff = Number(b.revisionNumber || 1) - Number(a.revisionNumber || 1);
-    if (revDiff) return revDiff;
-    return Number(b.uploadedAt || 0) - Number(a.uploadedAt || 0);
+    const revisionDiff = getSnapshotRevisionNumber(b) - getSnapshotRevisionNumber(a);
+    if (revisionDiff) return revisionDiff;
+    return snapshotUploadedAtValue(b) - snapshotUploadedAtValue(a);
   });
   return candidates[0] || null;
 }
@@ -4016,6 +4088,401 @@ function renderSnapshotMetaBar(snapshot, validation) {
 function noDataOrValue(v, formatter) { return (v === null || v === undefined || (typeof v === 'number' && (isNaN(v) || !isFinite(v)))) ? '<span class="muted">Data Tidak Tersedia</span>' : formatter(v); }
 
 /* ============================================================
+   SUPABASE, MODE VIEWER/ADMIN, DAN PAYLOAD PUBLIKASI
+   ============================================================ */
+const ADMIN_ROUTES = new Set([
+  '/upload', '/pengaturan', '/data-sumber', '/belum-eligible', '/publication-history',
+  '/settings', '/history', '/vacant', '/master-cabang'
+]);
+const AUTH_URL_KEYS = new Set(['access_token', 'refresh_token', 'expires_at', 'expires_in', 'token_type', 'type', 'code']);
+
+function isAdminRoute(route) { return ADMIN_ROUTES.has(route); }
+function requireAdmin(actionLabel) {
+  if (State.isAdmin === true && State.runtimeMode === 'admin') return true;
+  showToast(`Akses admin diperlukan${actionLabel ? ` untuk ${actionLabel}` : ''}.`, 'error');
+  if (parseHash().path !== '/dashboard') navigate('/dashboard');
+  return false;
+}
+function defaultSettings() {
+  return {
+    weights: getDefaultWeights(),
+    scoreCap: APP_CONFIG.DEFAULT_SCORE_CAP,
+    avgEcTarget: APP_CONFIG.DEFAULT_AVG_EC_TARGET,
+    detailKpiCharts: {},
+    statusSalesmanFilter: [...STATUS_SALESMAN_DEFAULT]
+  };
+}
+function safeUserError(error, fallback) {
+  return error && typeof error.message === 'string' && error.message.length <= 240 ? error.message : fallback;
+}
+function cleanAuthParametersFromUrl() {
+  const url = new URL(window.location.href);
+  let changed = false;
+  Array.from(url.searchParams.keys()).forEach(key => {
+    if (AUTH_URL_KEYS.has(key.toLowerCase())) { url.searchParams.delete(key); changed = true; }
+  });
+  const rawHash = url.hash.replace(/^#/, '');
+  if (/(^|[?&])(access_token|refresh_token|expires_at|expires_in|token_type|type|code)=/i.test(rawHash)) {
+    url.hash = '#/dashboard';
+    changed = true;
+  }
+  if (changed) history.replaceState(null, document.title, `${url.pathname}${url.search}${url.hash || '#/dashboard'}`);
+}
+function canonicalSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return null;
+  return {
+    id: String(snapshot.id || ''),
+    cutoffDate: String(snapshot.cutoffDate || ''),
+    revisionNumber: Number(snapshot.revisionNumber || 1),
+    uploadedAt: Number(snapshot.uploadedAt || Date.now()),
+    fileName: String(snapshot.fileName || ''),
+    sheetName: String(snapshot.sheetName || ''),
+    totalRead: Number(snapshot.totalRead || (Array.isArray(snapshot.rawRecords) ? snapshot.rawRecords.length : 0)),
+    totalEligible: Number(snapshot.totalEligible || 0),
+    totalNotEligible: Number(snapshot.totalNotEligible || 0),
+    dataSchemaVersion: Number(snapshot.dataSchemaVersion || APP_CONFIG.CURRENT_DATA_SCHEMA_VERSION),
+    hitRateSourceKey: snapshot.hitRateSourceKey || APP_CONFIG.CURRENT_HIT_RATE_SOURCE,
+    hitRateFormulaVersion: snapshot.hitRateFormulaVersion || APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION,
+    rawRecords: Array.isArray(snapshot.rawRecords) ? snapshot.rawRecords : []
+  };
+}
+function validateCanonicalSnapshot(snapshot, label) {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) throw new Error(`${label} tidak valid.`);
+  if (!Array.isArray(snapshot.rawRecords)) throw new Error(`${label}.rawRecords harus berupa array.`);
+  if (!String(snapshot.cutoffDate || '').match(/^\d{4}-\d{2}-\d{2}$/)) throw new Error(`${label}.cutoffDate tidak valid.`);
+  if (!Number.isInteger(Number(snapshot.revisionNumber)) || Number(snapshot.revisionNumber) <= 0) throw new Error(`${label}.revisionNumber tidak valid.`);
+}
+function validatePublishedPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Payload publikasi bukan object.');
+  if (Number(payload.schemaVersion) !== 1) throw new Error('Versi payload belum didukung.');
+  if (!payload.settings || typeof payload.settings !== 'object' || Array.isArray(payload.settings)) throw new Error('Settings publikasi tidak valid.');
+  if (!payload.settings.weights || typeof payload.settings.weights !== 'object' || Array.isArray(payload.settings.weights)) throw new Error('Bobot KPI publikasi tidak valid.');
+  APP_CONFIG.KPI_DEFS.forEach(def => {
+    if (!Number.isFinite(Number(payload.settings.weights[def.id]))) throw new Error(`Bobot ${def.label} tidak valid.`);
+  });
+  validateCanonicalSnapshot(payload.activeSnapshot, 'activeSnapshot');
+  if (!payload.masterCabang || typeof payload.masterCabang !== 'object' || !Array.isArray(payload.masterCabang.rows)) throw new Error('Master Cabang publikasi tidak valid.');
+  if (!Array.isArray(payload.vacantEntries)) throw new Error('Data VACANT publikasi tidak valid.');
+  if (payload.comparisonSnapshot !== null && payload.comparisonSnapshot !== undefined) {
+    validateCanonicalSnapshot(payload.comparisonSnapshot, 'comparisonSnapshot');
+    if (Object.prototype.hasOwnProperty.call(payload.comparisonSnapshot, 'comparisonSnapshot')) throw new Error('Snapshot pembanding tidak boleh bersarang.');
+  }
+  return true;
+}
+async function buildPublishedPayload() {
+  if (!requireAdmin('memublikasikan data')) throw new Error('Akses admin diperlukan.');
+  if (!State.activeSnapshot || !State.validation) throw new Error('Snapshot lokal aktif dan hasil validasi wajib tersedia.');
+  let comparisonSnapshot = null;
+  try {
+    const currentRemote = await window.SupabaseService.getActivePublishedSnapshot();
+    if (currentRemote && currentRemote.payload_json) {
+      validatePublishedPayload(currentRemote.payload_json);
+      comparisonSnapshot = canonicalSnapshot(currentRemote.payload_json.activeSnapshot);
+    }
+  } catch (error) {
+    throw new Error(`Snapshot pembanding tidak dapat disiapkan: ${safeUserError(error, 'data remote tidak valid')}`);
+  }
+  const activeSnapshot = canonicalSnapshot(State.activeSnapshot);
+  const recordCount = activeSnapshot.rawRecords.length;
+  const eligibleCount = Number(State.validation.totalEligible || 0);
+  const payload = {
+    schemaVersion: 1,
+    publishedAt: new Date().toISOString(),
+    metadata: {
+      cutoffDate: activeSnapshot.cutoffDate,
+      revisionNumber: activeSnapshot.revisionNumber,
+      fileName: activeSnapshot.fileName,
+      recordCount,
+      eligibleCount,
+    },
+    activeSnapshot,
+    comparisonSnapshot,
+    settings: {
+      ...State.settings,
+      weights: { ...State.settings.weights },
+      detailKpiCharts: { ...(State.settings.detailKpiCharts || {}) },
+      statusSalesmanFilter: [...getActiveStatusSalesmanFilter()]
+    },
+    masterCabang: {
+      rows: State.masterCabang && Array.isArray(State.masterCabang.rows) ? State.masterCabang.rows : [],
+      uploadedAt: State.masterCabang ? State.masterCabang.uploadedAt || null : null,
+      fileName: State.masterCabang ? State.masterCabang.fileName || null : null
+    },
+    vacantEntries: Array.isArray(State.vacantEntries) ? State.vacantEntries : []
+  };
+  validatePublishedPayload(payload);
+  return payload;
+}
+function normalizeRemotePublication(remoteMeta, source, cachedAt) {
+  const payload = remoteMeta && remoteMeta.payload_json ? remoteMeta.payload_json : remoteMeta && remoteMeta.payload;
+  const metadata = payload && payload.metadata ? payload.metadata : {};
+  return {
+    id: String((remoteMeta && remoteMeta.id) || ''),
+    cutoffDate: String((remoteMeta && remoteMeta.cutoff_date) || metadata.cutoffDate || ''),
+    revisionNumber: Number((remoteMeta && remoteMeta.revision_number) || metadata.revisionNumber || 1),
+    publishedAt: String((remoteMeta && remoteMeta.published_at) || (payload && payload.publishedAt) || ''),
+    fileName: String((remoteMeta && remoteMeta.file_name) || metadata.fileName || ''),
+    recordCount: Number((remoteMeta && remoteMeta.record_count) || metadata.recordCount || 0),
+    eligibleCount: Number((remoteMeta && remoteMeta.eligible_count) || metadata.eligibleCount || 0),
+    source,
+    cachedAt: Number(cachedAt || 0)
+  };
+}
+async function hydratePublishedPayload(payload, remoteMeta, source, cachedAt) {
+  validatePublishedPayload(payload);
+  const settings = {
+    ...defaultSettings(),
+    ...payload.settings,
+    weights: { ...getDefaultWeights(), ...payload.settings.weights },
+    statusSalesmanFilter: Array.isArray(payload.settings.statusSalesmanFilter) && payload.settings.statusSalesmanFilter.length
+      ? payload.settings.statusSalesmanFilter.filter(status => STATUS_SALESMAN_ALL.includes(status))
+      : [...STATUS_SALESMAN_DEFAULT]
+  };
+  State.settings = settings;
+  State.vacantEntries = payload.vacantEntries.map(entry => ({ ...entry }));
+  State.vacantKeySet = new Set(State.vacantEntries.map(entry => entry.id));
+  State.vacantVersion++;
+  setActiveMasterCabangInState({
+    rows: payload.masterCabang.rows,
+    uploadedAt: payload.masterCabang.uploadedAt,
+    fileName: payload.masterCabang.fileName
+  });
+  const active = canonicalSnapshot(payload.activeSnapshot);
+  if (remoteMeta && remoteMeta.id) active.id = String(remoteMeta.id);
+  const comparison = payload.comparisonSnapshot ? canonicalSnapshot(payload.comparisonSnapshot) : null;
+  State.snapshotList = comparison ? [active, comparison] : [active];
+  await loadSnapshotIntoState(active);
+  State.remotePublication = normalizeRemotePublication({ ...(remoteMeta || {}), payload_json: payload }, source, cachedAt);
+  State.remoteSource = source;
+  State.remoteStatusMessage = '';
+}
+async function loadViewerNationalData(options = {}) {
+  const allowCache = options.allowCache !== false;
+  try {
+    if (!State.supabaseReady) throw new Error('Supabase belum siap.');
+    const remote = await window.SupabaseService.getActivePublishedSnapshot();
+    if (!remote) {
+      await loadSnapshotIntoState(null);
+      State.remotePublication = null;
+      State.remoteSource = 'supabase';
+      State.remoteStatusMessage = 'Belum ada data nasional yang dipublikasikan.';
+      return { status: 'empty' };
+    }
+    await hydratePublishedPayload(remote.payload_json, remote, 'supabase');
+    try { await Storage.saveViewerCache(remote.payload_json, remote); } catch (cacheError) { console.error('Cache Viewer gagal diperbarui:', cacheError); }
+    return { status: 'remote' };
+  } catch (remoteError) {
+    if (allowCache) {
+      try {
+        const cached = await Storage.getViewerCache();
+        if (cached && cached.payload) {
+          await hydratePublishedPayload(cached.payload, cached.remoteMeta || {}, 'cache', cached.cachedAt);
+          State.remoteStatusMessage = 'Koneksi Supabase bermasalah. Menggunakan cache Viewer terakhir.';
+          return { status: 'cache', error: remoteError };
+        }
+      } catch (cacheError) {
+        console.error('Cache Viewer tidak dapat digunakan:', cacheError);
+      }
+    }
+    await loadSnapshotIntoState(null);
+    State.remotePublication = null;
+    State.remoteSource = null;
+    State.remoteStatusMessage = State.supabaseReady
+      ? 'Data nasional belum tersedia atau koneksi bermasalah.'
+      : (State.remoteStatusMessage || safeUserError(remoteError, 'Konfigurasi Supabase belum siap.'));
+    return { status: 'error', error: remoteError };
+  }
+}
+function publicDataBannerHtml() {
+  if (State.runtimeMode !== 'viewer' || !State.remotePublication || !State.activeSnapshot) return '';
+  const meta = State.remotePublication;
+  const sourceText = meta.source === 'cache' ? 'Cache Viewer' : 'Supabase';
+  const publishedText = meta.publishedAt ? fmtDateTimeId(Date.parse(meta.publishedAt)) : '-';
+  return `<div class="public-data-banner ${meta.source === 'cache' ? 'cache-source' : ''}">
+    <div><strong>Data per ${fmtDateId(meta.cutoffDate)}</strong> · Revisi ${fmtNumber(meta.revisionNumber)} · Dipublikasikan ${publishedText} · Sumber: ${sourceText}</div>
+    ${State.remoteStatusMessage ? `<div>${escapeHtml(State.remoteStatusMessage)}</div>` : ''}
+  </div>`;
+}
+async function refreshViewerData() {
+  if (State.runtimeMode !== 'viewer') return;
+  showLoadingOverlay('Mengambil data nasional terbaru...');
+  const result = await loadViewerNationalData({ allowCache: true });
+  hideLoadingOverlay();
+  renderSidebar();
+  router();
+  showToast(result.status === 'remote' ? 'Data nasional berhasil diperbarui.' : (result.status === 'cache' ? 'Supabase bermasalah. Cache terakhir tetap digunakan.' : State.remoteStatusMessage), result.status === 'remote' ? 'success' : 'info');
+}
+function openAdminLoginModal() {
+  if (!State.supabaseReady) {
+    showToast('Login belum tersedia. Lengkapi konfigurasi Supabase terlebih dahulu.', 'error');
+    return;
+  }
+  const overlay = openModal(`<div class="detail-header"><h2>Login Admin</h2><div class="detail-sub">Gunakan akun Supabase Auth yang terdaftar sebagai admin.</div></div>
+    <form class="login-form" id="admin-login-form">
+      <label>Email<input type="email" id="admin-email" autocomplete="username" required /></label>
+      <label>Password<input type="password" id="admin-password" autocomplete="current-password" required /></label>
+      <div class="form-error" id="admin-login-error" role="alert"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="admin-login-cancel">Batal</button>
+        <button type="submit" class="btn btn-primary" id="admin-login-submit">Masuk</button>
+      </div>
+    </form>`);
+  const form = overlay.querySelector('#admin-login-form');
+  const errorEl = overlay.querySelector('#admin-login-error');
+  const submitBtn = overlay.querySelector('#admin-login-submit');
+  overlay.querySelector('#admin-login-cancel').addEventListener('click', () => overlay.querySelector('[data-act="close"]').click());
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    errorEl.textContent = '';
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Memeriksa...';
+    const email = overlay.querySelector('#admin-email').value.trim();
+    const passwordInput = overlay.querySelector('#admin-password');
+    try {
+      await window.SupabaseService.signIn(email, passwordInput.value);
+      passwordInput.value = '';
+      const isAdmin = await window.SupabaseService.checkCurrentUserIsAdmin();
+      if (!isAdmin) {
+        await window.SupabaseService.signOut();
+        errorEl.textContent = 'Akses ditolak. Akun ini tidak terdaftar sebagai admin.';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Masuk';
+        return;
+      }
+      cleanAuthParametersFromUrl();
+      window.location.reload();
+    } catch (error) {
+      passwordInput.value = '';
+      errorEl.textContent = safeUserError(error, 'Login gagal.');
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Masuk';
+    }
+  });
+  setTimeout(() => overlay.querySelector('#admin-email').focus(), 0);
+}
+async function logoutAdmin() {
+  if (!State.isAdmin) return;
+  showLoadingOverlay('Logout...');
+  try {
+    await window.SupabaseService.signOut();
+    State.authSession = null;
+    State.isAdmin = false;
+    State.runtimeMode = 'viewer';
+    cleanAuthParametersFromUrl();
+    window.location.hash = '#/dashboard';
+    window.location.reload();
+  } catch (error) {
+    hideLoadingOverlay();
+    showToast(safeUserError(error, 'Logout gagal.'), 'error');
+  }
+}
+function estimatedPayloadBytes(payload) {
+  return new TextEncoder().encode(JSON.stringify(payload)).length;
+}
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+async function openPublishNationalDialog() {
+  if (!requireAdmin('memublikasikan data') || State.publicationBusy) return;
+  showLoadingOverlay('Menyiapkan payload publikasi...');
+  try {
+    const payload = await buildPublishedPayload();
+    const bytes = estimatedPayloadBytes(payload);
+    const meta = payload.metadata;
+    hideLoadingOverlay();
+    const overlay = openModal(`<div class="detail-header"><h2>Publikasikan Data Nasional</h2><div class="detail-sub">Periksa ringkasan sebelum mengganti data aktif Viewer.</div></div>
+      <dl class="publication-summary">
+        <dt>Tanggal cutoff</dt><dd>${escapeHtml(meta.cutoffDate)}</dd>
+        <dt>Revision</dt><dd>${fmtNumber(meta.revisionNumber)}</dd>
+        <dt>File sumber</dt><dd>${escapeHtml(meta.fileName)}</dd>
+        <dt>Jumlah record</dt><dd>${fmtNumber(meta.recordCount)}</dd>
+        <dt>Eligible</dt><dd>${fmtNumber(meta.eligibleCount)}</dd>
+        <dt>Not eligible</dt><dd>${fmtNumber(meta.recordCount - meta.eligibleCount)}</dd>
+        <dt>Master Cabang</dt><dd>${fmtNumber(payload.masterCabang.rows.length)}</dd>
+        <dt>VACANT</dt><dd>${fmtNumber(payload.vacantEntries.length)}</dd>
+        <dt>Ukuran JSON</dt><dd>${formatBytes(bytes)}</dd>
+        <dt>Waktu publikasi</dt><dd>${fmtDateTimeId(Date.parse(payload.publishedAt))}</dd>
+      </dl>
+      <div class="alert alert-warn">Data aktif Viewer akan diganti. Snapshot lokal Admin tetap tersimpan.</div>
+      <div class="form-error" id="publish-error" role="alert"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="publish-cancel">Batal</button>
+        <button type="button" class="btn btn-primary" id="publish-confirm">Ya, Publikasikan</button>
+      </div>`, { wide: true });
+    overlay.querySelector('#publish-cancel').addEventListener('click', () => overlay.querySelector('[data-act="close"]').click());
+    overlay.querySelector('#publish-confirm').addEventListener('click', async () => {
+      if (State.publicationBusy) return;
+      State.publicationBusy = true;
+      const button = overlay.querySelector('#publish-confirm');
+      const errorEl = overlay.querySelector('#publish-error');
+      button.disabled = true;
+      button.textContent = 'Memublikasikan...';
+      errorEl.textContent = '';
+      try {
+        const snapshotId = await window.SupabaseService.publishNationalSnapshot(payload, meta);
+        State.remotePublication = normalizeRemotePublication(await window.SupabaseService.getActivePublishedSnapshot(), 'supabase');
+        overlay.querySelector('[data-act="close"]').click();
+        showToast(`Publikasi berhasil. Snapshot ID: ${snapshotId}`, 'success');
+        renderTopbar(parseHash().path, parseHash().params);
+      } catch (error) {
+        errorEl.textContent = safeUserError(error, 'Publikasi gagal.');
+        button.disabled = false;
+        button.textContent = 'Ya, Publikasikan';
+      } finally {
+        State.publicationBusy = false;
+      }
+    });
+  } catch (error) {
+    hideLoadingOverlay();
+    showToast(safeUserError(error, 'Payload publikasi gagal disiapkan.'), 'error');
+  }
+}
+function renderPublicationHistoryPage() {
+  return `<div class="page-header"><h1>Riwayat Publikasi Nasional</h1><p class="page-sub">Riwayat ini terpisah dari riwayat upload lokal Admin.</p></div>
+    <div class="panel"><div id="publication-history-content"><div class="loading-state">Memuat riwayat publikasi...</div></div></div>`;
+}
+async function wirePublicationHistoryPage() {
+  if (!requireAdmin('melihat riwayat publikasi')) return;
+  const container = document.getElementById('publication-history-content');
+  try {
+    const rows = await window.SupabaseService.getPublishedSnapshotHistory(25);
+    if (!rows.length) {
+      container.innerHTML = '<div class="empty-state"><h2>Belum Ada Publikasi</h2><p>Publikasikan snapshot lokal pertama Anda.</p></div>';
+      return;
+    }
+    container.innerHTML = `<div class="dt-scroll"><table class="dt-table"><thead><tr>
+      <th>Cutoff</th><th>Revision</th><th>Dipublikasikan</th><th>File</th><th>Record</th><th>Eligible</th><th>Status</th><th>Aksi</th>
+      </tr></thead><tbody>${rows.map(row => `<tr>
+        <td>${fmtDateId(row.cutoff_date)}</td><td>${fmtNumber(row.revision_number)}</td><td>${fmtDateTimeId(Date.parse(row.published_at))}</td>
+        <td>${escapeHtml(row.file_name || '-')}</td><td>${fmtNumber(row.record_count)}</td><td>${fmtNumber(row.eligible_count)}</td>
+        <td>${row.is_active ? '<span class="badge cat-perfect">Aktif</span>' : '<span class="badge badge-muted">Tidak Aktif</span>'}</td>
+        <td><div class="publication-history-actions">${row.is_active ? '-' : `<button class="btn btn-xs btn-outline activate-publication" data-id="${escapeHtml(row.id)}">Aktifkan Kembali</button>`}</div></td>
+      </tr>`).join('')}</tbody></table></div>`;
+    container.querySelectorAll('.activate-publication').forEach(button => button.addEventListener('click', () => {
+      const snapshotId = button.dataset.id;
+      showConfirmDialog('Aktifkan kembali snapshot ini sebagai data nasional aktif?', async () => {
+        if (!requireAdmin('rollback publikasi')) return;
+        showLoadingOverlay('Mengaktifkan snapshot publikasi...');
+        try {
+          await window.SupabaseService.activatePublishedSnapshot(snapshotId);
+          State.remotePublication = normalizeRemotePublication(await window.SupabaseService.getActivePublishedSnapshot(), 'supabase');
+          hideLoadingOverlay();
+          showToast('Snapshot publikasi berhasil diaktifkan kembali.', 'success');
+          router();
+        } catch (error) {
+          hideLoadingOverlay();
+          showToast(safeUserError(error, 'Rollback gagal.'), 'error');
+        }
+      }, { confirmLabel: 'Ya, Aktifkan Kembali' });
+    }));
+  } catch (error) {
+    container.innerHTML = `<div class="alert alert-error">${escapeHtml(safeUserError(error, 'Riwayat publikasi gagal dimuat.'))}</div>`;
+  }
+}
+
+/* ============================================================
    ROUTING
    ============================================================ */
 const SIDEBAR_ITEMS = [
@@ -4027,11 +4494,12 @@ const SIDEBAR_ITEMS = [
   { path: '/ranking-ass', icon: '👔', label: 'Ranking ASS', group: 'RANKING' },
   { path: '/ranking-salesman', icon: '🧑‍💼', label: 'Ranking Salesman', group: 'RANKING' },
   { path: '/detail-kpi', icon: '📈', label: 'Detail KPI', group: 'RANKING' },
-  { path: '/upload', icon: '⬆️', label: 'Upload Data', group: 'DATA' },
-  { path: '/data-sumber', icon: '🗂️', label: 'Data Sumber Excel', group: 'DATA' },
-  { path: '/belum-eligible', icon: '⚠️', label: 'Data Belum Memenuhi Syarat', group: 'DATA' },
-  { path: '/upload', icon: '🕘', label: 'Riwayat Upload', group: 'DATA', hrefOverride: '#/upload?tab=riwayat', highlightKey: '/upload-riwayat' },
-  { path: '/pengaturan', icon: '⚙️', label: 'Pengaturan KPI', group: 'PENGATURAN' }
+  { path: '/upload', icon: '⬆️', label: 'Upload Data', group: 'ADMIN', adminOnly: true },
+  { path: '/data-sumber', icon: '🗂️', label: 'Data Sumber Excel', group: 'ADMIN', adminOnly: true },
+  { path: '/belum-eligible', icon: '⚠️', label: 'Data Belum Memenuhi Syarat', group: 'ADMIN', adminOnly: true },
+  { path: '/upload', icon: '🕘', label: 'Riwayat Upload', group: 'ADMIN', hrefOverride: '#/upload?tab=riwayat', highlightKey: '/upload-riwayat', adminOnly: true },
+  { path: '/publication-history', icon: '🌐', label: 'Riwayat Publikasi Nasional', group: 'ADMIN', adminOnly: true },
+  { path: '/pengaturan', icon: '⚙️', label: 'Pengaturan KPI', group: 'ADMIN', adminOnly: true }
 ];
 const PAGE_TITLES = {}; SIDEBAR_ITEMS.forEach(i => { if (!i.hrefOverride) PAGE_TITLES[i.path] = i.label; });
 
@@ -4061,13 +4529,13 @@ const ROUTES = {
   '/dashboard': renderDashboardPage, '/ranking-phase': renderRankingPhasePage, '/ranking-regional': renderRankingRegionalPage, '/ranking-cabang': renderRankingCabangPage, '/ranking-depo': renderRankingDepoPage,
   '/ranking-ass': renderRankingAssPage, '/ranking-salesman': renderRankingSalesmanPage, '/detail-kpi': renderDetailKpiPage,
   '/belum-eligible': renderBelumEligiblePage, '/upload': renderUploadPage, '/pengaturan': renderPengaturanPage,
-  '/data-sumber': renderDataSumberPage
+  '/data-sumber': renderDataSumberPage, '/publication-history': renderPublicationHistoryPage
 };
 const WIRE_FNS = {
   '/dashboard': wireDashboardPage, '/ranking-phase': wireRankingPhasePage, '/ranking-regional': wireRankingRegionalPage, '/ranking-cabang': wireRankingCabangPage, '/ranking-depo': wireRankingDepoPage,
   '/ranking-ass': wireRankingAssPage, '/ranking-salesman': wireRankingSalesmanPage, '/detail-kpi': wireDetailKpiPage,
   '/belum-eligible': wireBelumEligiblePage, '/upload': wireUploadPage, '/pengaturan': wirePengaturanPage,
-  '/data-sumber': wireDataSumberPage
+  '/data-sumber': wireDataSumberPage, '/publication-history': wirePublicationHistoryPage
 };
 
 const LEGACY_BLOCKED_PATHS = new Set(['/dashboard', '/ranking-phase', '/ranking-regional', '/ranking-cabang', '/ranking-depo', '/ranking-ass', '/ranking-salesman', '/detail-kpi', '/belum-eligible']);
@@ -4075,19 +4543,25 @@ function router() {
   if (State.pageAbortController) State.pageAbortController.abort(); // E: putuskan seluruh listener global halaman sebelumnya
   State.pageAbortController = new AbortController();
   State.pageSignal = State.pageAbortController.signal;
-  const { path, params } = parseHash();
+  let { path, params } = parseHash();
+  if (isAdminRoute(path) && !State.isAdmin) {
+    showToast('Akses admin diperlukan.', 'error');
+    history.replaceState(null, document.title, `${location.pathname}${location.search}#/dashboard`);
+    path = '/dashboard';
+    params = new URLSearchParams();
+  }
   const renderFn = ROUTES[path] || renderDashboardPage;
   const highlightKey = (path === '/upload' && params.get('tab') === 'riwayat') ? '/upload-riwayat' : path;
   highlightSidebar(highlightKey);
   renderTopbar(path, params);
   const root = document.getElementById('app-root');
-  if (!State.activeSnapshot && path !== '/upload' && path !== '/pengaturan') {
+  if (!State.activeSnapshot && !isAdminRoute(path)) {
     root.innerHTML = renderNoDataState(); wireNoDataState(); return;
   }
   if (State.activeSnapshot && State.isLegacyHitRateSnapshot && LEGACY_BLOCKED_PATHS.has(path)) {
     root.innerHTML = renderLegacySnapshotState(); wireLegacySnapshotState(); return;
   }
-  root.innerHTML = renderFn(params);
+  root.innerHTML = `${publicDataBannerHtml()}${renderFn(params)}`;
   const wireFn = WIRE_FNS[path]; if (wireFn) wireFn(params);
 }
 function renderLegacySnapshotState() {
@@ -4108,11 +4582,20 @@ function wireLegacySnapshotState() {
   const b2 = document.getElementById('goto-riwayat-legacy-btn'); if (b2) b2.addEventListener('click', () => navigate('/upload', { tab: 'riwayat' }));
 }
 function renderNoDataState() {
-  return `<div class="empty-state"><div class="empty-state-icon">📊</div><h2>Belum Ada Data</h2>
-    <p>Silakan upload file Excel data harian terlebih dahulu untuk mulai menggunakan dashboard.</p>
+  if (State.runtimeMode === 'viewer') {
+    const message = State.remoteStatusMessage || 'Belum ada data nasional yang dipublikasikan.';
+    return `<div class="empty-state"><div class="empty-state-icon">📊</div><h2>Data Nasional Belum Tersedia</h2>
+      <p>${escapeHtml(message)}</p>
+      ${State.supabaseReady ? '<button class="btn btn-primary" id="refresh-empty-viewer-btn">Perbarui Data</button>' : ''}</div>`;
+  }
+  return `<div class="empty-state"><div class="empty-state-icon">📊</div><h2>Belum Ada Data Lokal</h2>
+    <p>Upload file Excel data harian untuk mulai menggunakan workspace Admin.</p>
     <button class="btn btn-primary" id="goto-upload-btn">Upload Data Sekarang</button></div>`;
 }
-function wireNoDataState() { const btn = document.getElementById('goto-upload-btn'); if (btn) btn.addEventListener('click', () => navigate('/upload')); }
+function wireNoDataState() {
+  const btn = document.getElementById('goto-upload-btn'); if (btn) btn.addEventListener('click', () => navigate('/upload'));
+  const refreshBtn = document.getElementById('refresh-empty-viewer-btn'); if (refreshBtn) refreshBtn.addEventListener('click', refreshViewerData);
+}
 
 // Catatan: informasi visual "Snapshot Aktif" sengaja tidak ditampilkan ke pengguna
 // (sidebar/topbar). Sistem snapshot & State.activeSnapshot tetap berjalan penuh di balik layar
@@ -4131,7 +4614,7 @@ function renderSidebar() {
   const el = document.getElementById('sidebar');
   let groupsHtml = '';
   let currentGroup = '__none__';
-  SIDEBAR_ITEMS.forEach(item => {
+  SIDEBAR_ITEMS.filter(item => !item.adminOnly || State.isAdmin).forEach(item => {
     if (item.group !== currentGroup) {
       currentGroup = item.group;
       if (item.group) groupsHtml += `<div class="sidebar-group-title">${escapeHtml(item.group)}</div>`;
@@ -4303,7 +4786,9 @@ async function setActiveStatusSalesmanFilter(statuses) {
   const clean = STATUS_SALESMAN_ALL.filter(s => statuses.includes(s));
   if (!clean.length) { showToast('Minimal satu status harus dipilih.', 'error'); return; }
   State.settings.statusSalesmanFilter = clean;
-  try { await Storage.saveSettings(State.settings); } catch (error) { console.error(error); }
+  if (State.isAdmin) {
+    try { await Storage.saveSettings(State.settings); } catch (error) { console.error(error); }
+  }
   if (State.activeSnapshot) {
     State.validation = validateDataset(getCalculationRecords(State.activeSnapshot));
     State.rankingCache.clear();
@@ -4342,9 +4827,25 @@ function renderTopbar(path, params) {
       <div class="topbar-phase-filter">
         <button type="button" class="btn btn-outline btn-sm topbar-status-btn" id="topbar-status-btn">Status Salesman: ${escapeHtml(statusSalesmanFilterLabel())} ▾</button>
       </div>` : ''}
-    <button class="btn btn-primary btn-sm" id="topbar-upload-btn">⬆ Upload Data</button>
+    <div class="topbar-auth-actions">
+      <span class="runtime-badge ${State.isAdmin ? 'admin' : (State.remoteSource === 'cache' ? 'cache' : 'viewer')}"><span class="dot"></span>${State.isAdmin ? 'Mode Admin' : (State.remoteSource === 'cache' ? 'Viewer · Cache' : 'Mode Viewer')}</span>
+      ${State.isAdmin ? `
+        <button class="btn btn-outline btn-sm" id="topbar-publication-history-btn">Riwayat Publikasi</button>
+        ${State.activeSnapshot && State.validation ? '<button class="btn btn-primary btn-sm" id="topbar-publish-btn">Publikasikan Data Nasional</button>' : ''}
+        <button class="btn btn-primary btn-sm" id="topbar-upload-btn">⬆ Upload Data</button>
+        <button class="btn btn-ghost btn-sm" id="topbar-logout-btn">Logout</button>
+      ` : `
+        ${State.supabaseReady ? '<button class="btn btn-outline btn-sm" id="topbar-refresh-btn">Perbarui Data</button>' : ''}
+        <button class="btn btn-ghost btn-sm" id="topbar-login-btn">Login Admin</button>
+      `}
+    </div>
     ${vacantIncluded ? `<div class="topbar-vacant-warning">⚠ Posisi VACANT sedang disertakan dalam perhitungan.</div>` : ''}`;
   const btn = document.getElementById('topbar-upload-btn'); if (btn) btn.addEventListener('click', () => navigate('/upload'));
+  const loginBtn = document.getElementById('topbar-login-btn'); if (loginBtn) loginBtn.addEventListener('click', openAdminLoginModal);
+  const logoutBtn = document.getElementById('topbar-logout-btn'); if (logoutBtn) logoutBtn.addEventListener('click', logoutAdmin);
+  const refreshBtn = document.getElementById('topbar-refresh-btn'); if (refreshBtn) refreshBtn.addEventListener('click', refreshViewerData);
+  const publishBtn = document.getElementById('topbar-publish-btn'); if (publishBtn) publishBtn.addEventListener('click', openPublishNationalDialog);
+  const publicationHistoryBtn = document.getElementById('topbar-publication-history-btn'); if (publicationHistoryBtn) publicationHistoryBtn.addEventListener('click', () => navigate('/publication-history'));
   const dataBtn = document.getElementById('topbar-data-summary');
   if (dataBtn) dataBtn.addEventListener('click', (event) => { event.stopPropagation(); __activeDataPopover ? closeActiveDataPopover() : openActiveDataPopover(dataBtn); });
   const phaseSelect = document.getElementById('topbar-phase-select');
@@ -4712,7 +5213,7 @@ function rankingColumns(opts) {
   const nameExtraFn = opts.nameExtraFn || null;
   const nameRenderFn = opts.nameRenderFn || null; // override penuh render sel nama (dipakai khusus Ranking Salesman - lihat B)
   const rankMedalMode = opts.rankMedalMode || 'standard';
-  const selectionEnabled = opts.selectionEnabled === true;
+  const selectionEnabled = opts.selectionEnabled === true && State.isAdmin;
   const selectionWidth = selectionEnabled ? 44 : 0;
   const cols = [];
 
@@ -4819,6 +5320,10 @@ function renderVacantSalesmanMeta(table, scope, value) {
   if (!meta) return;
   const activeCount = Array.isArray(table.data) ? table.data.length : 0;
   const vacantCount = currentVacantRecordsForScope(scope, value).length;
+  if (!State.isAdmin) {
+    meta.innerHTML = `<span><strong>${fmtNumber(activeCount)}</strong> dihitung</span><span class="vacant-meta-divider">•</span><span><strong>${fmtNumber(vacantCount)}</strong> VACANT</span>`;
+    return;
+  }
   meta.innerHTML = `<span><strong>${fmtNumber(activeCount)}</strong> dihitung</span><span class="vacant-meta-divider">•</span><button type="button" class="vacant-count-link" ${vacantCount ? '' : 'disabled'}><strong>${fmtNumber(vacantCount)}</strong> VACANT</button>`;
   const link = meta.querySelector('.vacant-count-link');
   if (link && !link.disabled) link.addEventListener('click', () => openVacantSalesmanModal());
@@ -4838,6 +5343,7 @@ function renderVacantSelectionToolbar(table) {
   wrap.querySelector('#vacant-mark-btn').addEventListener('click', () => markSelectedSalesmenVacant(table));
 }
 async function markSelectedSalesmenVacant(table) {
+  if (!requireAdmin('mengelola Salesman VACANT')) return;
   const selectedKeys = new Set(State.vacantSelection);
   const selectedRecords = getRawRecordsForActivePhase(State.activeSnapshot).filter(record => selectedKeys.has(buildVacantSalesmanKey(record)));
   if (!selectedRecords.length) { showToast('Tidak ada Salesman yang dipilih.', 'info'); return; }
@@ -4860,6 +5366,7 @@ function wireVacantSalesmanControls(table, scope, value) {
   const container = document.getElementById(table.containerId);
   if (!container) return;
   renderVacantSalesmanMeta(table, scope, value);
+  if (!State.isAdmin) return;
   renderVacantSelectionToolbar(table);
   // afterRender terpanggil di SETIAP render (full maupun partial) - listener delegation hanya boleh dipasang
   // SEKALI per container agar tidak menumpuk (lihat V: "pastikan event delegation tidak membuat listener ganda").
@@ -4911,6 +5418,7 @@ function downloadVacantBackup() {
   document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
 }
 async function restoreVacantBackupFile(file, overlay) {
+  if (!requireAdmin('memulihkan data VACANT')) return;
   if (!file) return;
   showLoadingOverlay('Memulihkan data VACANT...');
   try {
@@ -4935,6 +5443,7 @@ async function restoreVacantBackupFile(file, overlay) {
   } finally { hideLoadingOverlay(); }
 }
 function openVacantSalesmanModal() {
+  if (!requireAdmin('mengelola Salesman VACANT')) return;
   const html = `<div class="vacant-modal-head"><div><h2 class="vacant-modal-title">Salesman VACANT</h2><div class="vacant-modal-subtitle"><span id="vacant-modal-count">${fmtNumber(State.vacantEntries.length)} data</span> • tersimpan lokal di browser ini</div></div>
     <div class="vacant-modal-actions"><input type="search" id="vacant-modal-search" placeholder="Cari Salesman VACANT..." /><button type="button" class="btn btn-outline btn-sm" id="vacant-backup-btn">Backup VACANT</button><button type="button" class="btn btn-outline btn-sm" id="vacant-restore-btn">Restore VACANT</button><input type="file" id="vacant-restore-file" accept="application/json,.json" hidden /></div></div>
     <div class="vacant-modal-table-wrap"><table class="vacant-modal-table"><thead><tr><th>Kode</th><th>Salesman</th><th>ASS</th><th>Depo</th><th>Regional</th><th>Aksi</th></tr></thead><tbody id="vacant-modal-body"></tbody></table></div>`;
@@ -7155,6 +7664,7 @@ function renderUploadBaruTab() {
     </div>`;
 }
 function wireUploadPage(params) {
+  if (!requireAdmin('mengelola upload')) return;
   const tab = params.get('tab') || 'baru';
   document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => navigate('/upload', { tab: btn.dataset.tab })));
   if (tab === 'baru') {
@@ -7176,6 +7686,7 @@ function wireUploadPage(params) {
 }
 
 async function handleMasterCabangFileSelected(file) {
+  if (!requireAdmin('mengunggah Master Cabang')) return;
   const previewArea = document.getElementById('master-cabang-preview-area');
   showLoadingOverlay('Membaca file Master Cabang...');
   try {
@@ -7230,6 +7741,7 @@ function renderMasterCabangPreview() {
   if (confirmBtn) confirmBtn.addEventListener('click', () => confirmMasterCabangUpload());
 }
 async function confirmMasterCabangUpload() {
+  if (!requireAdmin('menyimpan Master Cabang')) return;
   const preview = State.masterCabangPreview;
   if (!preview || !preview.validation.canSave) return;
   showLoadingOverlay('Menyimpan Master Cabang...');
@@ -7254,6 +7766,7 @@ function setActiveMasterCabangInState(record) {
 }
 
 async function handleFileSelected(file) {
+  if (!requireAdmin('mengunggah Excel')) return;
   const previewArea = document.getElementById('upload-preview-area');
   showLoadingOverlay('Membaca file Excel...');
   try {
@@ -7407,6 +7920,7 @@ function renderUploadPreview() {
 function statInfo(label, value) { return `<div class="stat-card static"><div class="stat-value" style="font-size:16px">${escapeHtml(String(value))}</div><div class="stat-label">${label}</div></div>`; }
 
 async function confirmSaveSnapshot() {
+  if (!requireAdmin('menyimpan snapshot lokal')) return;
   const up = State.uploadPreview;
   const cutoffDate = document.getElementById('cutoff-date-input').value;
   const note = document.getElementById('upload-note-input').value;
@@ -7414,7 +7928,7 @@ async function confirmSaveSnapshot() {
 
   const proceed = async () => {
     const id = `${cutoffDate}__${Date.now()}`;
-    const revisionNumber = State.snapshotList.filter(s => s.cutoffDate === cutoffDate).length + 1;
+    const revisionNumber = getNextLocalRevisionNumber(cutoffDate);
     const snapshot = {
       id, cutoffDate, fileName: up.file.name, sheetName: up.parsed.sheetName, note, uploadedAt: Date.now(), isActive: true, revisionNumber,
       dataSchemaVersion: APP_CONFIG.CURRENT_DATA_SCHEMA_VERSION,
@@ -7701,6 +8215,7 @@ function renderPengaturanPage() {
     </div>`;
 }
 function wirePengaturanPage() {
+  if (!requireAdmin('mengubah pengaturan KPI')) return;
   const originalWeights = { ...State.settings.weights };
   const originalAvgEc = State.settings.avgEcTarget, originalCap = State.settings.scoreCap;
   const updateTotal = () => {
@@ -7830,23 +8345,59 @@ function showFatalError(msg) {
 
 async function initApp() {
   try {
-    let settings = null;
-    try { settings = await Storage.getSettings(); } catch (e) { console.error(e); showToast('IndexedDB gagal dibuka, pengaturan memakai nilai default sementara.', 'error'); }
-    if (!settings) {
-      settings = { weights: getDefaultWeights(), scoreCap: APP_CONFIG.DEFAULT_SCORE_CAP, avgEcTarget: APP_CONFIG.DEFAULT_AVG_EC_TARGET, detailKpiCharts: {}, statusSalesmanFilter: [...STATUS_SALESMAN_DEFAULT] };
-      try { await Storage.saveSettings(settings); } catch (e) { console.error(e); }
-    } else if (!Array.isArray(settings.statusSalesmanFilter) || !settings.statusSalesmanFilter.length) {
-      settings.statusSalesmanFilter = [...STATUS_SALESMAN_DEFAULT]; // migrasi aman dari settings lama
-    }
-    State.settings = settings;
-    await reloadVacantState();
-    try { const savedMaster = await Storage.getMasterCabang(); if (savedMaster && Array.isArray(savedMaster.rows)) setActiveMasterCabangInState(savedMaster); } catch (e) { console.error('Gagal memuat Master Cabang:', e); }
-
+    State.settings = defaultSettings();
     try {
-      State.snapshotList = await Storage.listSnapshots();
-      const active = await Storage.getActiveSnapshot();
-      if (active) await loadSnapshotIntoState(active);
-    } catch (e) { console.error(e); showToast('Gagal memuat snapshot tersimpan.', 'error'); }
+      await window.SupabaseService.initialize();
+      State.supabaseReady = true;
+      await new Promise(resolve => setTimeout(resolve, 0));
+      State.authSession = await window.SupabaseService.getSession();
+    } catch (supabaseError) {
+      State.supabaseReady = false;
+      State.remoteStatusMessage = safeUserError(supabaseError, 'Supabase belum dapat diinisialisasi.');
+    }
+    cleanAuthParametersFromUrl();
+
+    if (State.supabaseReady && State.authSession) {
+      let verifiedAdmin = false;
+      try { verifiedAdmin = await window.SupabaseService.checkCurrentUserIsAdmin(); }
+      catch (adminError) { State.remoteStatusMessage = safeUserError(adminError, 'Status admin tidak dapat diverifikasi.'); }
+      if (verifiedAdmin) {
+        State.runtimeMode = 'admin';
+        State.isAdmin = true;
+      } else {
+        try { await window.SupabaseService.signOut(); } catch (_) {}
+        State.authSession = null;
+        State.runtimeMode = 'viewer';
+        State.isAdmin = false;
+        showToast('Akses ditolak. Akun tidak terdaftar sebagai admin.', 'error');
+      }
+    }
+
+    if (State.isAdmin) {
+      let settings = null;
+      try { settings = await Storage.getSettings(); } catch (e) { console.error(e); showToast('IndexedDB gagal dibuka, pengaturan memakai nilai default sementara.', 'error'); }
+      if (!settings) {
+        settings = defaultSettings();
+        try { await Storage.saveSettings(settings); } catch (e) { console.error(e); }
+      } else if (!Array.isArray(settings.statusSalesmanFilter) || !settings.statusSalesmanFilter.length) {
+        settings.statusSalesmanFilter = [...STATUS_SALESMAN_DEFAULT];
+      }
+      State.settings = settings;
+      await reloadVacantState();
+      try {
+        const savedMaster = await Storage.getMasterCabang();
+        if (savedMaster && Array.isArray(savedMaster.rows)) setActiveMasterCabangInState(savedMaster);
+      } catch (e) { console.error('Gagal memuat Master Cabang:', e); }
+      try {
+        State.snapshotList = await Storage.listSnapshots();
+        const active = await Storage.getActiveSnapshot();
+        if (active) await loadSnapshotIntoState(active);
+      } catch (e) { console.error(e); showToast('Gagal memuat snapshot lokal Admin.', 'error'); }
+    } else {
+      State.runtimeMode = 'viewer';
+      State.isAdmin = false;
+      await loadViewerNationalData({ allowCache: true });
+    }
 
     renderSidebar();
     window.addEventListener('hashchange', router);
