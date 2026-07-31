@@ -1,0 +1,21 @@
+# Data perusahaan
+*.xlsx
+*.xls
+*.csv
+
+# Backup lokal
+*.backup.html
+index-sebelum-*.html
+
+# File publikasi lokal
+published-data.json
+
+# Secret lokal
+.env
+.env.*
+*.secret
+*.key
+
+# Sistem operasi
+.DS_Store
+Thumbs.db
