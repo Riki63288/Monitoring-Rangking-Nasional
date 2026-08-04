@@ -461,7 +461,12 @@ select:focus,input:focus{outline:2px solid var(--gold);outline-offset:1px;}
 
 /* ===== DataTable ===== */
 .dt-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;}
-.dt-toolbar-right{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+.dt-toolbar-right{display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap;}
+.dt-tat-today{flex-basis:100%;text-align:right;margin-top:-3px;font-size:11.5px;font-weight:800;color:var(--navy);white-space:nowrap;}
+.dt-tat-today .dt-tat-today-label{color:var(--ink-soft);font-weight:700;}
+.dt-tat-today.is-legacy{color:var(--orange);}
+.regional-performance-tat{width:100%;text-align:right;font-size:11.5px;font-weight:800;color:var(--navy);margin-top:2px;}
+@media (max-width:700px){.dt-tat-today,.regional-performance-tat{text-align:left;}}
 .dt-pagesize-label{font-size:12px;color:var(--ink-soft);display:flex;gap:6px;align-items:center;}
 .dt-search-input{min-width:230px;}
 .dt-toolbar select,.dt-toolbar input[type=search],.dt-toolbar .btn{height:36px;box-sizing:border-box;}
@@ -1500,6 +1505,49 @@ function fmtDateTimeId(dateInput) {
   return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }) + ', ' +
     d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }).replace(':', '.') + ' WIB';
 }
+
+// TAT header: jumlah Hari Kerja (HK) dihitung dari tanggal cutoff snapshot.
+// Pola kerja default mengikuti operasional Senin-Sabtu; Minggu tidak dihitung.
+// Jika kelak snapshot memiliki workdayMtd/hariKerjaMtd dari sumber resmi, nilai itu diprioritaskan.
+function parseDateOnlyLocal(dateInput) {
+  if (!dateInput) return null;
+  if (dateInput instanceof Date) return isNaN(dateInput.getTime()) ? null : new Date(dateInput.getFullYear(), dateInput.getMonth(), dateInput.getDate());
+  const raw = String(dateInput).trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) {
+    const year = Number(match[1]), monthIndex = Number(match[2]) - 1, day = Number(match[3]);
+    const date = new Date(year, monthIndex, day);
+    return date.getFullYear() === year && date.getMonth() === monthIndex && date.getDate() === day ? date : null;
+  }
+  const date = new Date(dateInput);
+  return isNaN(date.getTime()) ? null : new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+function countWorkingDaysMtd(dateInput) {
+  const date = parseDateOnlyLocal(dateInput);
+  if (!date) return null;
+  let count = 0;
+  for (let day = 1; day <= date.getDate(); day++) {
+    const current = new Date(date.getFullYear(), date.getMonth(), day);
+    if (current.getDay() !== 0) count++; // Minggu tidak dihitung
+  }
+  return count;
+}
+function snapshotWorkingDayMtd(snapshot = State.activeSnapshot) {
+  if (!snapshot) return null;
+  const explicit = Number(snapshot.workdayMtd ?? snapshot.hariKerjaMtd ?? snapshot.hkMtd);
+  if (Number.isFinite(explicit) && explicit > 0) return Math.round(explicit);
+  return countWorkingDaysMtd(snapshot.cutoffDate);
+}
+function tatTodaySummaryText(snapshot = State.activeSnapshot) {
+  if (!snapshot || !isValidTatMtdValue(snapshot.tatMtd)) return 'TAT Hari Ini: -';
+  const hk = snapshotWorkingDayMtd(snapshot);
+  return `TAT Hari Ini: ${fmtPercent(Number(snapshot.tatMtd), 0)}${hk ? ` / ${fmtNumber(hk)} HK` : ''}`;
+}
+function tatTodaySummaryHtml(snapshot = State.activeSnapshot) {
+  const current = snapshot && isValidTatMtdValue(snapshot.tatMtd);
+  return `<div class="dt-tat-today${current ? '' : ' is-legacy'}"><span class="dt-tat-today-label">${current ? 'TAT Hari Ini:' : 'TAT Hari Ini:'}</span> ${current ? `${fmtPercent(Number(snapshot.tatMtd), 0)}${snapshotWorkingDayMtd(snapshot) ? ` / ${fmtNumber(snapshotWorkingDayMtd(snapshot))} HK` : ''}` : '-'}</div>`;
+}
+
 function medalFor(rank) {
   if (rank === 1) return '<span class="medal">🥇</span>';
   if (rank === 2) return '<span class="medal">🥈</span>';
@@ -3207,6 +3255,7 @@ class DataTable {
         ${this.enableHeaderFilters ? `<button class="btn btn-sm btn-outline dt-reset-filters" ${view.hasActiveHeaderFilters ? '' : 'hidden'}>↺ Reset Filter</button>` : ''}
         <button class="btn btn-sm btn-outline dt-export">⬇ Export CSV</button>
         ${this.jpgEnabled ? `<button class="btn btn-sm btn-outline dt-jpg" aria-label="Download tabel sebagai JPG" ${this._jpgBusy ? 'disabled' : ''}>${this._jpgBusy ? 'Menyiapkan JPG...' : '🖼 Download JPG'}</button>` : ''}
+        ${this.isRankingTable ? tatTodaySummaryHtml(State.activeSnapshot) : ''}
       </div>`;
 
     const scrollWrap = document.createElement('div'); scrollWrap.className = `dt-scroll${view.hasGroupedHeader ? ' dt-scroll-sticky' : ''}${this.mainRankingScroll ? ' dt-ranking-main-scroll' : ''}`;
@@ -5251,13 +5300,43 @@ function rankingTatMtd(row) {
   const value = row && isValidTatMtdValue(row.tatMtd) ? row.tatMtd : (row && row.rec && isValidTatMtdValue(row.rec.tatMtd) ? row.rec.tatMtd : null);
   return isValidTatMtdValue(value) ? Number(value) : null;
 }
+function rankingTatPerformance(row, kpiId) {
+  const tatMtd = rankingTatMtd(row);
+  if (!isValidTatMtdValue(tatMtd)) return null;
+  const entry = row && row.kpi ? row.kpi[kpiId] : null;
+  const stored = Number(entry && entry.scoreBasis);
+  if (Number.isFinite(stored)) return stored;
+  const actual = Number(entry && entry.actual);
+  const ratio = safeDivide(actual, Number(tatMtd));
+  return ratio === null ? null : ratio * 100;
+}
+function rankingTatExpectedTarget(row, targetGetter) {
+  const target = Number(targetGetter(row));
+  const tatMtd = rankingTatMtd(row);
+  if (!Number.isFinite(target) || !isValidTatMtdValue(tatMtd)) return null;
+  return target * Number(tatMtd) / 100;
+}
+function rankingTatValueText(value, valueType) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '-';
+  return valueType === 'money' ? fmtRupiah(Number(value)) : fmtNumber(Number(value), 0);
+}
+function rankingTatCellHtml(row, kpiId, targetGetter, actualGetter, valueType = 'number') {
+  const performance = rankingTatPerformance(row, kpiId);
+  if (performance === null) return '-';
+  const expected = rankingTatExpectedTarget(row, targetGetter);
+  const actual = Number(actualGetter(row));
+  const title = `Target seharusnya hari ini: ${rankingTatValueText(expected, valueType)} | Aktual MTD: ${rankingTatValueText(actual, valueType)} | Pencapaian TAT: ${fmtPercent(performance)}`;
+  return `<span title="${escapeHtml(title)}">${fmtPercent(performance)}</span>`;
+}
 function rankingCompactMoneyHtml(value) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return '-';
   return `<span title="${escapeHtml(fmtRupiah(Number(value)))}">${escapeHtml(fmtRupiahCompact(Number(value)))}</span>`;
 }
-function rankingTatColumn(key, groupKey, groupLabel, groupClass, width = 80) {
+function rankingTatColumn(key, groupKey, groupLabel, groupClass, kpiId, targetGetter, actualGetter, valueType = 'number', width = 80) {
   return { key, label: '%TAT', groupKey, groupLabel, groupClass, align: 'center', sortable: false, width,
-    render: row => fmtPercent(rankingTatMtd(row)), csvValue: row => rankingTatMtd(row), jpgValue: row => fmtPercent(rankingTatMtd(row)) };
+    render: row => rankingTatCellHtml(row, kpiId, targetGetter, actualGetter, valueType),
+    csvValue: row => rankingTatPerformance(row, kpiId),
+    jpgValue: row => fmtPercent(rankingTatPerformance(row, kpiId)) };
 }
 function rankingPercentColumn(key, label, groupKey, groupLabel, groupClass, kpiId, options = {}) {
   return {
@@ -5402,7 +5481,7 @@ function rankingColumns(opts) {
     { key: 'support.roa', label: 'ROA', groupKey: 'productivity', groupLabel: 'Productivity', groupClass: 'dt-grp-productivity', align: 'center', sortable: false, width: 86,
       render: row => fmtNumber(rankingRoaActual(row), 0), csvValue: row => rankingRoaActual(row), jpgValue: row => fmtNumber(rankingRoaActual(row), 0) },
     rankingPercentColumn('kpi.roaCb.actual', '%ROA', 'productivity', 'Productivity', 'dt-grp-productivity', 'roaCb', { width: 86, sortId: 'roaCb' }),
-    rankingTatColumn('support.tatRoa', 'productivity', 'Productivity', 'dt-grp-productivity'),
+    rankingTatColumn('support.tatRoa', 'productivity', 'Productivity', 'dt-grp-productivity', 'roaCb', rankingRoaTarget, rankingRoaActual, 'number'),
     rankingPercentColumn('kpi.hitRate.actual', 'EC VS CALL TOTAL', 'productivity', 'Productivity', 'dt-grp-productivity', 'hitRate', { width: 120, sortId: 'hitRate' }),
     {
       key: 'revenueNominal.target', label: 'TGT OMZ', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'tgtOmz', width: 104,
@@ -5417,7 +5496,7 @@ function rankingColumns(opts) {
       jpgValue: row => fmtRupiahCompact(rankingRevenueNominalActual(row))
     },
     rankingPercentColumn('kpi.revenue.actual', '% OMZ', 'revenue', 'Revenue Total', 'dt-grp-revenue', 'revenue', { width: 84, sortId: 'pctOmz' }),
-    rankingTatColumn('support.tatRevenue', 'revenue', 'Revenue Total', 'dt-grp-revenue'),
+    rankingTatColumn('support.tatRevenue', 'revenue', 'Revenue Total', 'dt-grp-revenue', 'revenue', rankingRevenueNominalTarget, rankingRevenueNominalActual, 'money'),
     {
       key: 'support.tgtEpb2', label: 'TGT EPB2', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'tgtEpb2', width: 88,
       render: row => fmtNumber(rankingEpbTarget(row), 0), csvValue: row => rankingEpbTarget(row), jpgValue: row => fmtNumber(rankingEpbTarget(row), 0)
@@ -5427,7 +5506,7 @@ function rankingColumns(opts) {
       render: row => fmtNumber(rankingEpbActual(row), 0), csvValue: row => rankingEpbActual(row), jpgValue: row => fmtNumber(rankingEpbActual(row), 0)
     },
     rankingPercentColumn('kpi.strata2.actual', '% EPB2', 'revenue', 'Revenue Total', 'dt-grp-revenue', 'strata2', { width: 86, sortId: 'pctEpb2' }),
-    rankingTatColumn('support.tatEpb2', 'revenue', 'Revenue Total', 'dt-grp-revenue'),
+    rankingTatColumn('support.tatEpb2', 'revenue', 'Revenue Total', 'dt-grp-revenue', 'strata2', rankingEpbTarget, rankingEpbActual, 'number'),
     { key: 'finalScore', label: 'Final Score', align: 'center', sortable: true, sortId: 'finalScore', headerBand: 'result', width: 104,
       render: r => `<strong>${fmtNumber(r.finalScore, 2)}</strong>`, csvValue: r => r.finalScore, jpgValue: r => fmtNumber(r.finalScore, 2) },
     { key: 'category.label', label: 'Kategori', align: 'center', sortable: false, headerBand: 'result', width: 128,
@@ -6323,16 +6402,16 @@ const REGIONAL_DEPO_PERF_COLUMNS = [
   { key: 'tgtRoa', group: 'productivity', label: 'TGT ROA', width: 90, value: r => fmtNumber(r.sums.cb, 0), csvValue: r => r.sums.cb },
   { key: 'roa', group: 'productivity', label: 'ROA', width: 86, value: r => fmtNumber(r.sums.roa, 0), csvValue: r => r.sums.roa },
   { key: 'roaCb', group: 'productivity', label: '%ROA', width: 86, value: r => fmtPercent(r.kpi.roaCb.actual), csvValue: r => r.kpi.roaCb.actual },
-  { key: 'tatRoa', group: 'productivity', label: '%TAT', width: 80, value: r => fmtPercent(rankingTatMtd(r)), csvValue: r => rankingTatMtd(r) },
+  { key: 'tatRoa', group: 'productivity', label: '%TAT', width: 80, value: r => rankingTatCellHtml(r, 'roaCb', rankingRoaTarget, rankingRoaActual, 'number'), csvValue: r => rankingTatPerformance(r, 'roaCb') },
   { key: 'hitRate', group: 'productivity', label: 'EC VS CALL TOTAL', width: 120, value: r => fmtPercent(r.kpi.hitRate.actual), csvValue: r => r.kpi.hitRate.actual },
   { key: 'targetOmzet', group: 'revenue', label: 'TGT OMZ', width: 104, value: r => rankingCompactMoneyHtml(r.revenueNominal.target), csvValue: r => r.revenueNominal.target },
   { key: 'omzetAktual', group: 'revenue', label: 'OMZET', width: 104, value: r => rankingCompactMoneyHtml(r.revenueNominal.actual), csvValue: r => r.revenueNominal.actual },
   { key: 'achOmzet', group: 'revenue', label: '% OMZ', width: 84, value: r => fmtPercent(r.kpi.revenue.actual), csvValue: r => r.kpi.revenue.actual },
-  { key: 'tatOmzet', group: 'revenue', label: '%TAT', width: 80, value: r => fmtPercent(rankingTatMtd(r)), csvValue: r => rankingTatMtd(r) },
+  { key: 'tatOmzet', group: 'revenue', label: '%TAT', width: 80, value: r => rankingTatCellHtml(r, 'revenue', rankingRevenueNominalTarget, rankingRevenueNominalActual, 'money'), csvValue: r => rankingTatPerformance(r, 'revenue') },
   { key: 'targetEpb2', group: 'revenue', label: 'TGT EPB2', width: 88, value: r => fmtNumber(r.sums.tgtEpbStrata2, 0), csvValue: r => r.sums.tgtEpbStrata2 },
   { key: 'epb2', group: 'revenue', label: 'EPB2', width: 80, value: r => fmtNumber(r.sums.achEpbPoinRoa, 0), csvValue: r => r.sums.achEpbPoinRoa },
   { key: 'strata2', group: 'revenue', label: '% EPB2', width: 86, value: r => fmtPercent(r.kpi.strata2.actual), csvValue: r => r.kpi.strata2.actual },
-  { key: 'tatEpb2', group: 'revenue', label: '%TAT', width: 80, value: r => fmtPercent(rankingTatMtd(r)), csvValue: r => rankingTatMtd(r) },
+  { key: 'tatEpb2', group: 'revenue', label: '%TAT', width: 80, value: r => rankingTatCellHtml(r, 'strata2', rankingEpbTarget, rankingEpbActual, 'number'), csvValue: r => rankingTatPerformance(r, 'strata2') },
   { key: 'finalScore', group: 'result', label: 'Final Score', width: 104, value: r => fmtNumber(r.finalScore, 2), csvValue: r => r.finalScore },
   { key: 'kategori', group: 'result', label: 'Kategori', width: 128, isCategory: true, value: r => categoryBadge(r.category), csvValue: r => r.category ? r.category.label : '' }
 ];
@@ -6607,6 +6686,7 @@ function openRegionalDepoPerformanceModal(regionRow) {
       <div class="regional-performance-actions">
         <button class="btn btn-outline btn-sm" id="regional-depo-export-csv-btn" aria-label="Export Pencapaian Depo sebagai CSV">⬇ Export CSV</button>
         <button class="btn btn-outline btn-sm" id="regional-depo-download-jpg-btn" aria-label="Download Pencapaian Depo sebagai JPG">🖼 Download JPG</button>
+        <div class="regional-performance-tat">${escapeHtml(tatTodaySummaryText(State.activeSnapshot))}</div>
       </div>
     </div>
     ${buildRegionalPerformanceSummaryHtml(regionRow, depoRows)}
@@ -6643,6 +6723,7 @@ async function generateRegionalDepoPerformanceJpg(regionRow, depoRows) {
   container.innerHTML = `
     <div class="dashboard-jpg-title">PENCAPAIAN DEPO — ${escapeHtml(regionRow.meta.region).toUpperCase()}</div>
     <div class="dashboard-jpg-subtitle">Ringkasan pencapaian operasional seluruh Depo.</div>
+    <div class="dashboard-jpg-subtitle">${escapeHtml(tatTodaySummaryText(State.activeSnapshot))}</div>
     <div class="dashboard-jpg-subtitle">${escapeHtml(statusSalesmanSummaryChip())}${statusSalesmanVacantWarningText() ? ' &nbsp;|&nbsp; ' + escapeHtml(statusSalesmanVacantWarningText()) : ''}</div>
     ${buildRegionalPerformanceSummaryHtml(regionRow, depoRows)}
     ${buildRegionalDepoPerformanceTableHtml(depoRows, { mode: 'jpg' })}
