@@ -461,12 +461,7 @@ select:focus,input:focus{outline:2px solid var(--gold);outline-offset:1px;}
 
 /* ===== DataTable ===== */
 .dt-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;}
-.dt-toolbar-right{display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap;}
-.dt-tat-today{flex-basis:100%;text-align:right;margin-top:-3px;font-size:11.5px;font-weight:800;color:var(--navy);white-space:nowrap;}
-.dt-tat-today .dt-tat-today-label{color:var(--ink-soft);font-weight:700;}
-.dt-tat-today.is-legacy{color:var(--orange);}
-.regional-performance-tat{width:100%;text-align:right;font-size:11.5px;font-weight:800;color:var(--navy);margin-top:2px;}
-@media (max-width:700px){.dt-tat-today,.regional-performance-tat{text-align:left;}}
+.dt-toolbar-right{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
 .dt-pagesize-label{font-size:12px;color:var(--ink-soft);display:flex;gap:6px;align-items:center;}
 .dt-search-input{min-width:230px;}
 .dt-toolbar select,.dt-toolbar input[type=search],.dt-toolbar .btn{height:36px;box-sizing:border-box;}
@@ -1145,9 +1140,9 @@ const APP_CONFIG = {
   STORE_VACANT: 'vacantSalesmen',
   STORE_MASTER_CABANG: 'masterCabang',
   STORE_VIEWER_CACHE: 'viewerCache',
-  CURRENT_DATA_SCHEMA_VERSION: 3,
-  CURRENT_HIT_RATE_SOURCE: 'totalCallEsuite',
-  CURRENT_HIT_RATE_FORMULA_VERSION: 'avgEc_div_totalCallEsuite_v1',
+  CURRENT_DATA_SCHEMA_VERSION: 4,
+  CURRENT_HIT_RATE_SOURCE: 'totalCallDay',
+  CURRENT_HIT_RATE_FORMULA_VERSION: 'avgEc_div_totalCallDay_v1',
   CURRENT_TAT_SOURCE: 'tatMtd',
   CURRENT_TAT_FORMULA_VERSION: 'achievement_div_tat_v1',
   STORE_SETTINGS: 'settings',
@@ -1175,11 +1170,11 @@ const APP_CONFIG = {
     { key: 'roa', aliases: ['ROA'], fallbackCol: 13, type: 'number', group: 'kpi' },
     { key: 'pctAchMtdRoaCb', aliases: ['%ACH MTD'], fallbackCol: 14, type: 'percent', group: 'kpi' },
 
-    { key: 'totalCallDay', aliases: ['TOTAL CALL/DAY', 'TOTAL CALL / DAY'], fallbackCol: 18, type: 'number', group: 'support' },
+    { key: 'totalCallDay', aliases: ['TOTAL CALL/DAY', 'TOTAL CALL / DAY'], fallbackCol: 18, type: 'number', group: 'kpi' },
     { key: 'tgtScJks', aliases: ['TGT SC JKS'], fallbackCol: 19, type: 'number', group: 'kpi' },
     { key: 'achScVsJks', aliases: ['ACH SC VS JKS'], fallbackCol: 20, type: 'number', group: 'kpi' },
     { key: 'pctAchScVsJks', aliases: ['%ACH SC VS JKS'], fallbackCol: 21, type: 'percent', group: 'kpi' },
-    { key: 'totalCallEsuite', aliases: ['TOTAL CALL ESUITE', 'TOTAL CALL E-SUITE', 'TOTAL CALL E SUITE', 'TOTAL CALL ESUITE/DAY'], fallbackCol: 22, type: 'number', group: 'kpi' },
+    { key: 'totalCallEsuite', aliases: ['TOTAL CALL ESUITE', 'TOTAL CALL E-SUITE', 'TOTAL CALL E SUITE', 'TOTAL CALL ESUITE/DAY'], fallbackCol: 22, type: 'number', group: 'support' },
 
     { key: 'geofencing', aliases: ['GEOFANCING', 'GEOFENCING'], fallbackCol: 25, type: 'number', group: 'kpi' },
     { key: 'pctAchGeofencing', aliases: ['%ACH GEOFANCING', '%ACH GEOFANCING'], fallbackCol: 26, type: 'percent', group: 'kpi' },
@@ -1221,8 +1216,8 @@ const APP_CONFIG = {
       info: '≥90% Perfect, 85-89.99% Good, <85% Perlu Ditingkatkan.',
       categoryFn: (v) => v >= 90 ? { label: 'Perfect', cls: 'cat-perfect' } : v >= 85 ? { label: 'Good', cls: 'cat-good' } : { label: 'Perlu Ditingkatkan', cls: 'cat-bad' } },
     { id: 'hitRate', label: 'EC vs Call Total', group: 'productivity', groupLabel: 'Productivity', defaultWeight: 10,
-      formula: 'AVG EC ÷ TOTAL CALL ESUITE × 100%', computeSalesman: (r) => safeDivide(r.avgEc, r.totalCallEsuite) === null ? null : safeDivide(r.avgEc, r.totalCallEsuite) * 100,
-      numeratorField: 'avgEc', denominatorField: 'totalCallEsuite',
+      formula: 'AVG EC ÷ TOTAL CALL/DAY × 100%', computeSalesman: (r) => safeDivide(r.avgEc, r.totalCallDay) === null ? null : safeDivide(r.avgEc, r.totalCallDay) * 100,
+      numeratorField: 'avgEc', denominatorField: 'totalCallDay',
       info: '100% Perfect, 80-99.99% Sangat Bagus, 70-79.99% Good, <70% Perlu Ditingkatkan.',
       categoryFn: (v) => v >= 100 ? { label: 'Perfect', cls: 'cat-perfect' } : v >= 80 ? { label: 'Sangat Bagus', cls: 'cat-great' } : v >= 70 ? { label: 'Good', cls: 'cat-good' } : { label: 'Perlu Ditingkatkan', cls: 'cat-bad' } },
     { id: 'avgEcAch', label: 'Golden EC', group: 'productivity', groupLabel: 'Productivity', defaultWeight: 15,
@@ -1505,49 +1500,6 @@ function fmtDateTimeId(dateInput) {
   return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }) + ', ' +
     d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }).replace(':', '.') + ' WIB';
 }
-
-// TAT header: jumlah Hari Kerja (HK) dihitung dari tanggal cutoff snapshot.
-// Pola kerja default mengikuti operasional Senin-Sabtu; Minggu tidak dihitung.
-// Jika kelak snapshot memiliki workdayMtd/hariKerjaMtd dari sumber resmi, nilai itu diprioritaskan.
-function parseDateOnlyLocal(dateInput) {
-  if (!dateInput) return null;
-  if (dateInput instanceof Date) return isNaN(dateInput.getTime()) ? null : new Date(dateInput.getFullYear(), dateInput.getMonth(), dateInput.getDate());
-  const raw = String(dateInput).trim();
-  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (match) {
-    const year = Number(match[1]), monthIndex = Number(match[2]) - 1, day = Number(match[3]);
-    const date = new Date(year, monthIndex, day);
-    return date.getFullYear() === year && date.getMonth() === monthIndex && date.getDate() === day ? date : null;
-  }
-  const date = new Date(dateInput);
-  return isNaN(date.getTime()) ? null : new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-function countWorkingDaysMtd(dateInput) {
-  const date = parseDateOnlyLocal(dateInput);
-  if (!date) return null;
-  let count = 0;
-  for (let day = 1; day <= date.getDate(); day++) {
-    const current = new Date(date.getFullYear(), date.getMonth(), day);
-    if (current.getDay() !== 0) count++; // Minggu tidak dihitung
-  }
-  return count;
-}
-function snapshotWorkingDayMtd(snapshot = State.activeSnapshot) {
-  if (!snapshot) return null;
-  const explicit = Number(snapshot.workdayMtd ?? snapshot.hariKerjaMtd ?? snapshot.hkMtd);
-  if (Number.isFinite(explicit) && explicit > 0) return Math.round(explicit);
-  return countWorkingDaysMtd(snapshot.cutoffDate);
-}
-function tatTodaySummaryText(snapshot = State.activeSnapshot) {
-  if (!snapshot || !isValidTatMtdValue(snapshot.tatMtd)) return 'TAT Hari Ini: -';
-  const hk = snapshotWorkingDayMtd(snapshot);
-  return `TAT Hari Ini: ${fmtPercent(Number(snapshot.tatMtd), 0)}${hk ? ` / ${fmtNumber(hk)} HK` : ''}`;
-}
-function tatTodaySummaryHtml(snapshot = State.activeSnapshot) {
-  const current = snapshot && isValidTatMtdValue(snapshot.tatMtd);
-  return `<div class="dt-tat-today${current ? '' : ' is-legacy'}"><span class="dt-tat-today-label">${current ? 'TAT Hari Ini:' : 'TAT Hari Ini:'}</span> ${current ? `${fmtPercent(Number(snapshot.tatMtd), 0)}${snapshotWorkingDayMtd(snapshot) ? ` / ${fmtNumber(snapshotWorkingDayMtd(snapshot))} HK` : ''}` : '-'}</div>`;
-}
-
 function medalFor(rank) {
   if (rank === 1) return '<span class="medal">🥇</span>';
   if (rank === 2) return '<span class="medal">🥈</span>';
@@ -2102,8 +2054,8 @@ function validateRow(rec) {
   if (rec.geofencing === null || isNaN(rec.geofencing)) reasons.push({ field: 'geofencing', message: 'GEOFANCING bukan angka valid', value: rec.geofencing });
   if (!(rec.cb > 0)) reasons.push({ field: 'cb', message: 'CB harus lebih dari 0', value: rec.cb });
   if (rec.roa === null || isNaN(rec.roa)) reasons.push({ field: 'roa', message: 'ROA bukan angka valid', value: rec.roa });
-  const totalCallEsuiteReason = validatePositiveNumberField(rec, 'totalCallEsuite', 'TOTAL CALL ESUITE');
-  if (totalCallEsuiteReason) reasons.push(totalCallEsuiteReason);
+  const totalCallDayReason = validatePositiveNumberField(rec, 'totalCallDay', 'TOTAL CALL/DAY');
+  if (totalCallDayReason) reasons.push(totalCallDayReason);
   if (rec.avgEc === null || isNaN(rec.avgEc)) reasons.push({ field: 'avgEc', message: 'AVG EC (EPD MTD) bukan angka valid', value: rec.avgEc });
   if (!(rec.tgtOmsFm > 0)) reasons.push({ field: 'tgtOmsFm', message: 'Target Revenue (Tgt Oms FM) harus lebih dari 0', value: rec.tgtOmsFm });
   if (rec.mtdOmsFm === null || isNaN(rec.mtdOmsFm)) reasons.push({ field: 'mtdOmsFm', message: 'Revenue aktual (MTD Oms FM) bukan angka valid', value: rec.mtdOmsFm });
@@ -2270,7 +2222,7 @@ function aggregateByGroup(eligibleRecords, allRecords, keyFn, metaFn, settings) 
     if (!groups.has(key)) {
       groups.set(key, {
         key, meta: metaFn(rec), totalSalesman: 0, eligibleSalesman: 0, notEligibleSalesman: 0,
-        sums: { achScVsJks: 0, tgtScJks: 0, geofencing: 0, roa: 0, cb: 0, avgEc: 0, totalCallEsuite: 0, mtdOmsFm: 0, tgtOmsFm: 0, achEpbPoinRoa: 0, tgtEpbStrata2: 0 },
+        sums: { achScVsJks: 0, tgtScJks: 0, geofencing: 0, roa: 0, cb: 0, avgEc: 0, totalCallDay: 0, mtdOmsFm: 0, tgtOmsFm: 0, achEpbPoinRoa: 0, tgtEpbStrata2: 0 },
         tatMtd: isValidTatMtdValue(rec && rec.tatMtd) ? Number(rec.tatMtd) : null,
         eligibleMembers: []
       });
@@ -2283,7 +2235,7 @@ function aggregateByGroup(eligibleRecords, allRecords, keyFn, metaFn, settings) 
     const s = g.sums;
     s.achScVsJks += num(rec.achScVsJks); s.tgtScJks += num(rec.tgtScJks);
     s.geofencing += num(rec.geofencing); s.roa += num(rec.roa); s.cb += num(rec.cb);
-    s.avgEc += num(rec.avgEc); s.totalCallEsuite += num(rec.totalCallEsuite);
+    s.avgEc += num(rec.avgEc); s.totalCallDay += num(rec.totalCallDay);
     s.mtdOmsFm += num(rec.mtdOmsFm); s.tgtOmsFm += num(rec.tgtOmsFm);
     s.achEpbPoinRoa += num(rec.achEpbPoinRoa); s.tgtEpbStrata2 += num(rec.tgtEpbStrata2);
   });
@@ -2300,7 +2252,7 @@ function computeGroupKpisAndScore(g, settings) {
     scJks: pctv(safeDivide(s.achScVsJks, s.tgtScJks)),
     geofencing: pctv(safeDivide(s.geofencing, s.achScVsJks)),
     roaCb: pctv(safeDivide(s.roa, s.cb)),
-    hitRate: pctv(safeDivide(s.avgEc, s.totalCallEsuite)),
+    hitRate: pctv(safeDivide(s.avgEc, s.totalCallDay)),
     avgEcAch: pctv(safeDivide(s.avgEc, settings.avgEcTarget * eligibleCount)),
     revenue: pctv(safeDivide(s.mtdOmsFm, s.tgtOmsFm)),
     strata2: pctv(safeDivide(s.achEpbPoinRoa, s.tgtEpbStrata2))
@@ -3255,7 +3207,6 @@ class DataTable {
         ${this.enableHeaderFilters ? `<button class="btn btn-sm btn-outline dt-reset-filters" ${view.hasActiveHeaderFilters ? '' : 'hidden'}>↺ Reset Filter</button>` : ''}
         <button class="btn btn-sm btn-outline dt-export">⬇ Export CSV</button>
         ${this.jpgEnabled ? `<button class="btn btn-sm btn-outline dt-jpg" aria-label="Download tabel sebagai JPG" ${this._jpgBusy ? 'disabled' : ''}>${this._jpgBusy ? 'Menyiapkan JPG...' : '🖼 Download JPG'}</button>` : ''}
-        ${this.isRankingTable ? tatTodaySummaryHtml(State.activeSnapshot) : ''}
       </div>`;
 
     const scrollWrap = document.createElement('div'); scrollWrap.className = `dt-scroll${view.hasGroupedHeader ? ' dt-scroll-sticky' : ''}${this.mainRankingScroll ? ' dt-ranking-main-scroll' : ''}`;
@@ -4723,13 +4674,13 @@ function router() {
 function renderLegacySnapshotState() {
   const snapshot = State.activeSnapshot || {};
   return `<div class="empty-state"><div class="empty-state-icon">⚠️</div><h2>Struktur EC vs Call Total Lama</h2>
-    <p>Snapshot aktif masih menggunakan struktur <strong>TOTAL CALL/DAY</strong> dan belum dapat dipakai untuk EC vs Call Total baru.</p>
+    <p>Snapshot aktif masih menggunakan formula lama <strong>TOTAL CALL ESUITE</strong> dan belum dapat dipakai untuk EC vs Call Total berbasis TOTAL CALL/DAY.</p>
     <div class="legacy-snapshot-info" style="display:inline-grid;gap:6px;text-align:left;background:#fff;border:1px solid var(--card-border);border-radius:10px;padding:12px 16px;margin:6px 0 16px;min-width:320px;">
       <div><strong>File:</strong> ${escapeHtml(snapshot.fileName || '-')}</div>
       <div><strong>Tanggal Data:</strong> ${snapshot.cutoffDate ? fmtDateId(snapshot.cutoffDate) : '-'}</div>
       <div><strong>Revisi:</strong> ${snapshot.revisionNumber || 1}</div>
     </div>
-    <p>Upload file Excel baru yang memiliki kolom <strong>TOTAL CALL ESUITE</strong>, lalu tekan <strong>Simpan dan Gunakan Data</strong>.</p>
+    <p>Upload file Excel baru yang memiliki kolom <strong>TOTAL CALL/DAY</strong>, lalu tekan <strong>Simpan dan Gunakan Data</strong>.</p>
     <button class="btn btn-primary" id="goto-upload-legacy-btn">Upload File Baru</button>
     <button class="btn btn-outline" id="goto-riwayat-legacy-btn" style="margin-left:8px;">Lihat Riwayat Upload</button></div>`;
 }
@@ -4835,7 +4786,7 @@ function openActiveDataPopover(button) {
       <div class="topbar-data-popover-label">Phase aktif</div><div class="topbar-data-popover-value">${escapeHtml(State.activePhaseFilter || 'Semua Phase')}</div>
       <div class="topbar-data-popover-label">Data valid</div><div class="topbar-data-popover-value">${fmtNumber(State.validation.totalEligible || 0)}</div>
       <div class="topbar-data-popover-label">Bermasalah</div><div class="topbar-data-popover-value">${fmtNumber(State.validation.totalNotEligible || 0)}</div>
-      <div class="topbar-data-popover-label">EC vs Call Total</div><div class="topbar-data-popover-value">TOTAL CALL ESUITE</div>
+      <div class="topbar-data-popover-label">EC vs Call Total</div><div class="topbar-data-popover-value">TOTAL CALL/DAY</div>
       <div class="topbar-data-popover-label">TAT MTD</div><div class="topbar-data-popover-value">${isValidTatMtdValue(snapshot.tatMtd) ? fmtPercent(snapshot.tatMtd) : '-'}</div>
       <div class="topbar-data-popover-label">Pembanding</div><div class="topbar-data-popover-value">${escapeHtml(comparisonSnapshotLabel())}</div>
     </div>
@@ -5300,43 +5251,13 @@ function rankingTatMtd(row) {
   const value = row && isValidTatMtdValue(row.tatMtd) ? row.tatMtd : (row && row.rec && isValidTatMtdValue(row.rec.tatMtd) ? row.rec.tatMtd : null);
   return isValidTatMtdValue(value) ? Number(value) : null;
 }
-function rankingTatPerformance(row, kpiId) {
-  const tatMtd = rankingTatMtd(row);
-  if (!isValidTatMtdValue(tatMtd)) return null;
-  const entry = row && row.kpi ? row.kpi[kpiId] : null;
-  const stored = Number(entry && entry.scoreBasis);
-  if (Number.isFinite(stored)) return stored;
-  const actual = Number(entry && entry.actual);
-  const ratio = safeDivide(actual, Number(tatMtd));
-  return ratio === null ? null : ratio * 100;
-}
-function rankingTatExpectedTarget(row, targetGetter) {
-  const target = Number(targetGetter(row));
-  const tatMtd = rankingTatMtd(row);
-  if (!Number.isFinite(target) || !isValidTatMtdValue(tatMtd)) return null;
-  return target * Number(tatMtd) / 100;
-}
-function rankingTatValueText(value, valueType) {
-  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '-';
-  return valueType === 'money' ? fmtRupiah(Number(value)) : fmtNumber(Number(value), 0);
-}
-function rankingTatCellHtml(row, kpiId, targetGetter, actualGetter, valueType = 'number') {
-  const performance = rankingTatPerformance(row, kpiId);
-  if (performance === null) return '-';
-  const expected = rankingTatExpectedTarget(row, targetGetter);
-  const actual = Number(actualGetter(row));
-  const title = `Target seharusnya hari ini: ${rankingTatValueText(expected, valueType)} | Aktual MTD: ${rankingTatValueText(actual, valueType)} | Pencapaian TAT: ${fmtPercent(performance)}`;
-  return `<span title="${escapeHtml(title)}">${fmtPercent(performance)}</span>`;
-}
 function rankingCompactMoneyHtml(value) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return '-';
   return `<span title="${escapeHtml(fmtRupiah(Number(value)))}">${escapeHtml(fmtRupiahCompact(Number(value)))}</span>`;
 }
-function rankingTatColumn(key, groupKey, groupLabel, groupClass, kpiId, targetGetter, actualGetter, valueType = 'number', width = 80) {
+function rankingTatColumn(key, groupKey, groupLabel, groupClass, width = 80) {
   return { key, label: '%TAT', groupKey, groupLabel, groupClass, align: 'center', sortable: false, width,
-    render: row => rankingTatCellHtml(row, kpiId, targetGetter, actualGetter, valueType),
-    csvValue: row => rankingTatPerformance(row, kpiId),
-    jpgValue: row => fmtPercent(rankingTatPerformance(row, kpiId)) };
+    render: row => fmtPercent(rankingTatMtd(row)), csvValue: row => rankingTatMtd(row), jpgValue: row => fmtPercent(rankingTatMtd(row)) };
 }
 function rankingPercentColumn(key, label, groupKey, groupLabel, groupClass, kpiId, options = {}) {
   return {
@@ -5481,7 +5402,7 @@ function rankingColumns(opts) {
     { key: 'support.roa', label: 'ROA', groupKey: 'productivity', groupLabel: 'Productivity', groupClass: 'dt-grp-productivity', align: 'center', sortable: false, width: 86,
       render: row => fmtNumber(rankingRoaActual(row), 0), csvValue: row => rankingRoaActual(row), jpgValue: row => fmtNumber(rankingRoaActual(row), 0) },
     rankingPercentColumn('kpi.roaCb.actual', '%ROA', 'productivity', 'Productivity', 'dt-grp-productivity', 'roaCb', { width: 86, sortId: 'roaCb' }),
-    rankingTatColumn('support.tatRoa', 'productivity', 'Productivity', 'dt-grp-productivity', 'roaCb', rankingRoaTarget, rankingRoaActual, 'number'),
+    rankingTatColumn('support.tatRoa', 'productivity', 'Productivity', 'dt-grp-productivity'),
     rankingPercentColumn('kpi.hitRate.actual', 'EC VS CALL TOTAL', 'productivity', 'Productivity', 'dt-grp-productivity', 'hitRate', { width: 120, sortId: 'hitRate' }),
     {
       key: 'revenueNominal.target', label: 'TGT OMZ', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'tgtOmz', width: 104,
@@ -5496,7 +5417,7 @@ function rankingColumns(opts) {
       jpgValue: row => fmtRupiahCompact(rankingRevenueNominalActual(row))
     },
     rankingPercentColumn('kpi.revenue.actual', '% OMZ', 'revenue', 'Revenue Total', 'dt-grp-revenue', 'revenue', { width: 84, sortId: 'pctOmz' }),
-    rankingTatColumn('support.tatRevenue', 'revenue', 'Revenue Total', 'dt-grp-revenue', 'revenue', rankingRevenueNominalTarget, rankingRevenueNominalActual, 'money'),
+    rankingTatColumn('support.tatRevenue', 'revenue', 'Revenue Total', 'dt-grp-revenue'),
     {
       key: 'support.tgtEpb2', label: 'TGT EPB2', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'tgtEpb2', width: 88,
       render: row => fmtNumber(rankingEpbTarget(row), 0), csvValue: row => rankingEpbTarget(row), jpgValue: row => fmtNumber(rankingEpbTarget(row), 0)
@@ -5506,7 +5427,7 @@ function rankingColumns(opts) {
       render: row => fmtNumber(rankingEpbActual(row), 0), csvValue: row => rankingEpbActual(row), jpgValue: row => fmtNumber(rankingEpbActual(row), 0)
     },
     rankingPercentColumn('kpi.strata2.actual', '% EPB2', 'revenue', 'Revenue Total', 'dt-grp-revenue', 'strata2', { width: 86, sortId: 'pctEpb2' }),
-    rankingTatColumn('support.tatEpb2', 'revenue', 'Revenue Total', 'dt-grp-revenue', 'strata2', rankingEpbTarget, rankingEpbActual, 'number'),
+    rankingTatColumn('support.tatEpb2', 'revenue', 'Revenue Total', 'dt-grp-revenue'),
     { key: 'finalScore', label: 'Final Score', align: 'center', sortable: true, sortId: 'finalScore', headerBand: 'result', width: 104,
       render: r => `<strong>${fmtNumber(r.finalScore, 2)}</strong>`, csvValue: r => r.finalScore, jpgValue: r => fmtNumber(r.finalScore, 2) },
     { key: 'category.label', label: 'Kategori', align: 'center', sortable: false, headerBand: 'result', width: 128,
@@ -6126,7 +6047,7 @@ function openSalesmanDetailDrawer(row) {
     <div class="detail-group"><h3>Productivity <span class="group-score">(${fmtNumber(groups.productivity.groupScore, 2)})</span></h3>
       <table class="detail-table"><thead><tr><th>KPI</th><th class="ta-right">Aktual</th><th class="ta-right">Score</th><th class="ta-right">Bobot</th><th class="ta-right">Kontribusi</th></tr></thead>
       <tbody>${kpiRow(kpi.roaCb)}${kpiRow(kpi.hitRate)}${kpiRow(kpi.avgEcAch)}</tbody></table>
-      <div class="detail-support-info">CB/TGT ROA: ${fmtNumber(rec.cb)} • ROA: ${fmtNumber(rec.roa)} • TAT MTD: ${fmtPercent(rec.tatMtd)} • Total Call eSuite: ${fmtNumber(rec.totalCallEsuite, 2)} • AVG EC: ${fmtNumber(rec.avgEc, 2)} (target 25)</div>
+      <div class="detail-support-info">CB/TGT ROA: ${fmtNumber(rec.cb)} • ROA: ${fmtNumber(rec.roa)} • TAT MTD: ${fmtPercent(rec.tatMtd)} • Total Call/Day: ${fmtNumber(rec.totalCallDay, 2)} • AVG EC: ${fmtNumber(rec.avgEc, 2)} (target 25)</div>
     </div>
     <div class="detail-group"><h3>Revenue Total <span class="group-score">(${fmtNumber(groups.revenue.groupScore, 2)})</span></h3>
       <table class="detail-table"><thead><tr><th>KPI</th><th class="ta-right">Aktual</th><th class="ta-right">Score</th><th class="ta-right">Bobot</th><th class="ta-right">Kontribusi</th></tr></thead>
@@ -6195,7 +6116,7 @@ async function generateSalesmanDetailJpg(row) {
       <thead><tr><th class="ta-left">Kelompok</th><th class="ta-left">Angka Dasar</th></tr></thead>
       <tbody>
         <tr><td class="ta-left">Proses Kerja</td><td class="ta-left">TGT SC JKS: ${fmtNumber(rec.tgtScJks)} &nbsp;|&nbsp; ACH SC VS JKS: ${fmtNumber(rec.achScVsJks)} &nbsp;|&nbsp; Geofencing: ${fmtNumber(rec.geofencing)}</td></tr>
-        <tr><td class="ta-left">Productivity</td><td class="ta-left">CB: ${fmtNumber(rec.cb)} &nbsp;|&nbsp; ROA: ${fmtNumber(rec.roa)} &nbsp;|&nbsp; Total Call eSuite: ${fmtNumber(rec.totalCallEsuite, 2)} &nbsp;|&nbsp; AVG EC: ${fmtNumber(rec.avgEc, 2)} &nbsp;|&nbsp; Target AVG EC: ${fmtNumber(State.settings.avgEcTarget)}</td></tr>
+        <tr><td class="ta-left">Productivity</td><td class="ta-left">CB: ${fmtNumber(rec.cb)} &nbsp;|&nbsp; ROA: ${fmtNumber(rec.roa)} &nbsp;|&nbsp; Total Call/Day: ${fmtNumber(rec.totalCallDay, 2)} &nbsp;|&nbsp; AVG EC: ${fmtNumber(rec.avgEc, 2)} &nbsp;|&nbsp; Target AVG EC: ${fmtNumber(State.settings.avgEcTarget)}</td></tr>
         <tr><td class="ta-left">Revenue</td><td class="ta-left">Target Revenue: ${fmtRupiah(rec.tgtOmsFm)} &nbsp;|&nbsp; Revenue Aktual: ${fmtRupiah(rec.mtdOmsFm)} &nbsp;|&nbsp; Target Strata 2: ${fmtNumber(rec.tgtEpbStrata2)} &nbsp;|&nbsp; Actual Strata 2: ${fmtNumber(rec.achEpbPoinRoa)} &nbsp;|&nbsp; Status Strata 2: ${escapeHtml(rec.isAchieveSt2 || '-')}</td></tr>
       </tbody>
     </table>
@@ -6402,16 +6323,16 @@ const REGIONAL_DEPO_PERF_COLUMNS = [
   { key: 'tgtRoa', group: 'productivity', label: 'TGT ROA', width: 90, value: r => fmtNumber(r.sums.cb, 0), csvValue: r => r.sums.cb },
   { key: 'roa', group: 'productivity', label: 'ROA', width: 86, value: r => fmtNumber(r.sums.roa, 0), csvValue: r => r.sums.roa },
   { key: 'roaCb', group: 'productivity', label: '%ROA', width: 86, value: r => fmtPercent(r.kpi.roaCb.actual), csvValue: r => r.kpi.roaCb.actual },
-  { key: 'tatRoa', group: 'productivity', label: '%TAT', width: 80, value: r => rankingTatCellHtml(r, 'roaCb', rankingRoaTarget, rankingRoaActual, 'number'), csvValue: r => rankingTatPerformance(r, 'roaCb') },
+  { key: 'tatRoa', group: 'productivity', label: '%TAT', width: 80, value: r => fmtPercent(rankingTatMtd(r)), csvValue: r => rankingTatMtd(r) },
   { key: 'hitRate', group: 'productivity', label: 'EC VS CALL TOTAL', width: 120, value: r => fmtPercent(r.kpi.hitRate.actual), csvValue: r => r.kpi.hitRate.actual },
   { key: 'targetOmzet', group: 'revenue', label: 'TGT OMZ', width: 104, value: r => rankingCompactMoneyHtml(r.revenueNominal.target), csvValue: r => r.revenueNominal.target },
   { key: 'omzetAktual', group: 'revenue', label: 'OMZET', width: 104, value: r => rankingCompactMoneyHtml(r.revenueNominal.actual), csvValue: r => r.revenueNominal.actual },
   { key: 'achOmzet', group: 'revenue', label: '% OMZ', width: 84, value: r => fmtPercent(r.kpi.revenue.actual), csvValue: r => r.kpi.revenue.actual },
-  { key: 'tatOmzet', group: 'revenue', label: '%TAT', width: 80, value: r => rankingTatCellHtml(r, 'revenue', rankingRevenueNominalTarget, rankingRevenueNominalActual, 'money'), csvValue: r => rankingTatPerformance(r, 'revenue') },
+  { key: 'tatOmzet', group: 'revenue', label: '%TAT', width: 80, value: r => fmtPercent(rankingTatMtd(r)), csvValue: r => rankingTatMtd(r) },
   { key: 'targetEpb2', group: 'revenue', label: 'TGT EPB2', width: 88, value: r => fmtNumber(r.sums.tgtEpbStrata2, 0), csvValue: r => r.sums.tgtEpbStrata2 },
   { key: 'epb2', group: 'revenue', label: 'EPB2', width: 80, value: r => fmtNumber(r.sums.achEpbPoinRoa, 0), csvValue: r => r.sums.achEpbPoinRoa },
   { key: 'strata2', group: 'revenue', label: '% EPB2', width: 86, value: r => fmtPercent(r.kpi.strata2.actual), csvValue: r => r.kpi.strata2.actual },
-  { key: 'tatEpb2', group: 'revenue', label: '%TAT', width: 80, value: r => rankingTatCellHtml(r, 'strata2', rankingEpbTarget, rankingEpbActual, 'number'), csvValue: r => rankingTatPerformance(r, 'strata2') },
+  { key: 'tatEpb2', group: 'revenue', label: '%TAT', width: 80, value: r => fmtPercent(rankingTatMtd(r)), csvValue: r => rankingTatMtd(r) },
   { key: 'finalScore', group: 'result', label: 'Final Score', width: 104, value: r => fmtNumber(r.finalScore, 2), csvValue: r => r.finalScore },
   { key: 'kategori', group: 'result', label: 'Kategori', width: 128, isCategory: true, value: r => categoryBadge(r.category), csvValue: r => r.category ? r.category.label : '' }
 ];
@@ -6686,7 +6607,6 @@ function openRegionalDepoPerformanceModal(regionRow) {
       <div class="regional-performance-actions">
         <button class="btn btn-outline btn-sm" id="regional-depo-export-csv-btn" aria-label="Export Pencapaian Depo sebagai CSV">⬇ Export CSV</button>
         <button class="btn btn-outline btn-sm" id="regional-depo-download-jpg-btn" aria-label="Download Pencapaian Depo sebagai JPG">🖼 Download JPG</button>
-        <div class="regional-performance-tat">${escapeHtml(tatTodaySummaryText(State.activeSnapshot))}</div>
       </div>
     </div>
     ${buildRegionalPerformanceSummaryHtml(regionRow, depoRows)}
@@ -6723,7 +6643,6 @@ async function generateRegionalDepoPerformanceJpg(regionRow, depoRows) {
   container.innerHTML = `
     <div class="dashboard-jpg-title">PENCAPAIAN DEPO — ${escapeHtml(regionRow.meta.region).toUpperCase()}</div>
     <div class="dashboard-jpg-subtitle">Ringkasan pencapaian operasional seluruh Depo.</div>
-    <div class="dashboard-jpg-subtitle">${escapeHtml(tatTodaySummaryText(State.activeSnapshot))}</div>
     <div class="dashboard-jpg-subtitle">${escapeHtml(statusSalesmanSummaryChip())}${statusSalesmanVacantWarningText() ? ' &nbsp;|&nbsp; ' + escapeHtml(statusSalesmanVacantWarningText()) : ''}</div>
     ${buildRegionalPerformanceSummaryHtml(regionRow, depoRows)}
     ${buildRegionalDepoPerformanceTableHtml(depoRows, { mode: 'jpg' })}
@@ -8110,9 +8029,9 @@ function renderUploadPreview() {
         <div class="v-item ${up.parsed.skippedTemplateRows > 0 ? 'info' : ''}">Baris template/duplikat header dilewati: ${up.parsed.skippedTemplateRows}</div>
         <div class="v-item ${up.dupInfo.duplicateCodes.length ? 'warn' : 'ok'}">Duplikasi Kode Salesman terdeteksi: ${up.dupInfo.duplicateCodes.length}</div>
         <div class="v-item ${validation.totalNotEligible ? 'warn' : 'ok'}">Data tidak lengkap / nilai tidak valid / pembagi nol: ${validation.totalNotEligible}</div>
-        <div class="v-item ${(!up.parsed.notFound.includes('totalCallEsuite') || up.parsed.rawRecords.some(r => Number.isFinite(r.totalCallEsuite))) ? 'ok' : 'warn'}">
-          Struktur EC vs Call Total: <strong>TOTAL CALL ESUITE</strong>
-          <div class="v-detail">Sumber: header TOTAL CALL ESUITE (fallback W/index 22) • Formula: AVG EC ÷ TOTAL CALL ESUITE × 100%</div>
+        <div class="v-item ${(!up.parsed.notFound.includes('totalCallDay') || up.parsed.rawRecords.some(r => Number.isFinite(r.totalCallDay))) ? 'ok' : 'warn'}">
+          Struktur EC vs Call Total: <strong>TOTAL CALL/DAY</strong>
+          <div class="v-detail">Sumber: header TOTAL CALL/DAY (fallback S/index 18) • Formula: AVG EC ÷ TOTAL CALL/DAY × 100%</div>
         </div>
         <div class="v-item ${tatValidation.valid ? 'ok' : 'warn'}">
           TAT MTD: <strong>${tatValidation.valid ? fmtPercent(tatValidation.tatMtd) : 'Tidak valid'}</strong>
@@ -8160,7 +8079,7 @@ async function confirmSaveSnapshot() {
       id, cutoffDate, fileName: up.file.name, sheetName: up.parsed.sheetName, note, uploadedAt: Date.now(), isActive: true, revisionNumber,
       dataSchemaVersion: APP_CONFIG.CURRENT_DATA_SCHEMA_VERSION,
       hitRateSourceKey: APP_CONFIG.CURRENT_HIT_RATE_SOURCE,
-      hitRateSourceHeader: 'TOTAL CALL ESUITE',
+      hitRateSourceHeader: 'TOTAL CALL/DAY',
       hitRateFormulaVersion: APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION,
       tatMtd: up.tatValidation.tatMtd,
       tatSourceKey: APP_CONFIG.CURRENT_TAT_SOURCE,
@@ -8169,8 +8088,8 @@ async function confirmSaveSnapshot() {
     };
     showLoadingOverlay('Menyimpan dan mengaktifkan data terbaru...');
     try {
-      const hasTotalCallEsuiteField = !up.parsed.notFound.includes('totalCallEsuite') || up.parsed.rawRecords.some(record => Number.isFinite(record.totalCallEsuite));
-      if (!hasTotalCallEsuiteField) throw new Error('Kolom TOTAL CALL ESUITE tidak ditemukan pada file yang dipilih.');
+      const hasTotalCallDayField = !up.parsed.notFound.includes('totalCallDay') || up.parsed.rawRecords.some(record => Number.isFinite(record.totalCallDay));
+      if (!hasTotalCallDayField) throw new Error('Kolom TOTAL CALL/DAY tidak ditemukan pada file yang dipilih.');
 
       await Storage.saveAndActivateSnapshot(snapshot);
       const activeAfterSave = await Storage.getActiveSnapshot();
@@ -8255,7 +8174,7 @@ function renderRiwayatTable() {
       { key: 'totalEligible', label: 'Data Valid', align: 'right', sortable: true, render: r => fmtNumber(r.totalEligible) },
       { key: 'totalNotEligible', label: 'Data Bermasalah', align: 'right', sortable: true, render: r => fmtNumber(r.totalNotEligible) },
       { key: 'revisionNumber', label: 'Revisi', align: 'right', sortable: true, render: r => r.revisionNumber || 1 },
-      { key: 'dataSchemaVersion', label: 'Struktur EC vs Call', sortable: true, render: r => isLegacyHitRateSnapshot(r) ? '<span class="badge cat-critical">Struktur Lama</span>' : '<span class="badge cat-perfect">Total Call eSuite</span>' },
+      { key: 'dataSchemaVersion', label: 'Struktur EC vs Call', sortable: true, render: r => isLegacyHitRateSnapshot(r) ? '<span class="badge cat-critical">Formula Lama</span>' : '<span class="badge cat-perfect">Total Call/Day</span>' },
       { key: 'tatFormulaVersion', label: 'Formula TAT', sortable: true, render: r => isLegacyTatSnapshot(r) ? '<span class="badge cat-needimprove">Legacy</span>' : `<span class="badge cat-perfect">${fmtPercent(r.tatMtd)}</span>` },
       { key: 'isActive', label: 'Status', sortable: true, render: r => r.isActive ? '<span class="badge cat-perfect">Sedang Digunakan</span>' : '<span class="badge badge-muted">Tersimpan</span>' },
       { key: 'aksi', label: 'Aksi', sortable: false, excludeFromJpg: true, render: r => `<div class="row-actions">
@@ -8280,7 +8199,7 @@ function renderRiwayatTable() {
       await loadSnapshotIntoState(active);
       hideLoadingOverlay();
       renderSidebar();
-      showToast(isLegacyHitRateSnapshot(active) ? 'Snapshot lama diaktifkan. Upload ulang data untuk EC vs Call Total baru.' : 'Data berhasil digunakan.', isLegacyHitRateSnapshot(active) ? 'info' : 'success');
+      showToast(isLegacyHitRateSnapshot(active) ? 'Snapshot formula lama diaktifkan. Upload ulang data untuk EC vs Call Total berbasis TOTAL CALL/DAY.' : 'Data berhasil digunakan.', isLegacyHitRateSnapshot(active) ? 'info' : 'success');
       navigate(isLegacyHitRateSnapshot(active) ? '/upload' : '/dashboard');
     } else if (e.target.classList.contains('act-view')) {
       const snap = await Storage.getSnapshot(id);
@@ -8527,21 +8446,23 @@ function phaseSummaryChip() {
   return State.activePhaseFilter ? [`Phase: ${State.activePhaseFilter}`] : [];
 }
 
-// Snapshot lama (sebelum migrasi Hit Rate ke TOTAL CALL ESUITE) dibedakan dari snapshot baru
-// berdasarkan metadata DAN keberadaan field pada record. Nilai kosong pada sebagian record bukan legacy;
-// baris tersebut cukup masuk Data Belum Memenuhi Syarat.
-function snapshotHasTotalCallEsuite(snapshot) {
+// Snapshot Hit Rate lama dibedakan dari formula aktif TOTAL CALL/DAY.
+// Snapshot baru wajib membawa metadata formula. Snapshot lama sebelum era metadata tetap dapat digunakan
+// hanya bila memiliki TOTAL CALL/DAY dan tidak menyatakan sumber/formula lain secara eksplisit.
+function snapshotHasTotalCallDay(snapshot) {
   const records = Array.isArray(snapshot && snapshot.rawRecords) ? snapshot.rawRecords : [];
-  return records.some(record => record && Object.prototype.hasOwnProperty.call(record, 'totalCallEsuite'));
+  return records.some(record => record && Object.prototype.hasOwnProperty.call(record, 'totalCallDay'));
 }
 function isLegacyHitRateSnapshot(snapshot) {
   if (!snapshot) return false;
-  const versionIsCurrent = Number(snapshot.dataSchemaVersion) >= APP_CONFIG.CURRENT_DATA_SCHEMA_VERSION;
-  const sourceIsCurrent = snapshot.hitRateSourceKey === APP_CONFIG.CURRENT_HIT_RATE_SOURCE;
-  const formulaIsCurrent = snapshot.hitRateFormulaVersion === APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION;
-  if (versionIsCurrent && sourceIsCurrent && formulaIsCurrent) return false;
-  if (snapshotHasTotalCallEsuite(snapshot)) return false;
-  return true;
+  const sourceKey = String(snapshot.hitRateSourceKey || '').trim();
+  const formulaVersion = String(snapshot.hitRateFormulaVersion || '').trim();
+  const hasExplicitFormulaMetadata = !!sourceKey || !!formulaVersion;
+  const sourceIsCurrent = sourceKey === APP_CONFIG.CURRENT_HIT_RATE_SOURCE;
+  const formulaIsCurrent = formulaVersion === APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION;
+  if (sourceIsCurrent && formulaIsCurrent) return false;
+  if (hasExplicitFormulaMetadata) return true;
+  return !snapshotHasTotalCallDay(snapshot);
 }
 async function loadSnapshotIntoState(snapshot) {
   State.vacantSelection.clear();
