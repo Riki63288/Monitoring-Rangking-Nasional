@@ -2680,7 +2680,7 @@ function plainDeltaText(value, kind, comparison) {
 }
 function comparisonSnapshotLabel() {
   const snapshot = State.comparison && State.comparison.previousSnapshot;
-  return snapshot ? `${fmtDateId(snapshot.cutoffDate)}${snapshot.revisionNumber ? ` (Rev ${snapshot.revisionNumber})` : ''}` : 'Tidak tersedia';
+  return snapshot ? `${fmtDateId(snapshot.cutoffDate)}${snapshot.revisionNumber ? ` (Rev Data ${snapshot.revisionNumber})` : ''}` : 'Tidak tersedia';
 }
 
 function getHierarchyCached(validation, settings) {
@@ -4390,6 +4390,14 @@ function validatePublishedPayload(payload) {
   APP_CONFIG.KPI_DEFS.forEach(def => {
     if (!Number.isFinite(Number(payload.settings.weights[def.id]))) throw new Error(`Bobot ${def.label} tidak valid.`);
   });
+  // metadata.revisionNumber = REVISI PUBLIKASI, activeSnapshot.revisionNumber = REVISI DATA.
+  // Keduanya sengaja BOLEH berbeda dan TIDAK divalidasi harus sama.
+  const metadata = payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : null;
+  if (!metadata || Array.isArray(metadata)) throw new Error('Metadata publikasi tidak valid.');
+  if (!isPositiveInteger(metadata.revisionNumber)) throw new Error('Revisi publikasi pada metadata tidak valid.');
+  if (metadata.sourceRevisionNumber !== null && metadata.sourceRevisionNumber !== undefined && !isPositiveInteger(metadata.sourceRevisionNumber)) {
+    throw new Error('Revisi data pada metadata tidak valid.');
+  }
   validateCanonicalSnapshot(payload.activeSnapshot, 'activeSnapshot');
   if (!payload.masterCabang || typeof payload.masterCabang !== 'object' || !Array.isArray(payload.masterCabang.rows)) throw new Error('Master Cabang publikasi tidak valid.');
   if (!Array.isArray(payload.vacantEntries)) throw new Error('Data VACANT publikasi tidak valid.');
@@ -4565,6 +4573,62 @@ function validatePublishScopeIsolation(payload, regionKeySet) {
   if (leakedVacant) throw new Error('Payload publikasi tidak lolos validasi cakupan Regional (data VACANT di luar cakupan).');
   return true;
 }
+/* ------------------------------------------------------------
+   REVISI DATA vs REVISI PUBLIKASI
+   ------------------------------------------------------------
+   REVISI DATA (Source Revision)     = State.activeSnapshot.revisionNumber.
+       Versi snapshot lokal hasil Upload Data. HANYA berubah lewat flow Upload existing,
+       TIDAK PERNAH naik karena Publish.
+   REVISI PUBLIKASI (Publication Rev) = published_snapshots.revision_number.
+       Urutan pengiriman ke Supabase/Viewer untuk satu cutoff_date. Satu Revisi Data boleh
+       dipublish berkali-kali dengan Revisi Publikasi berbeda.
+   Database memakai UNIQUE(cutoff_date, revision_number) — constraint itu BENAR; sebelumnya
+   frontend salah mengirim Source Revision sebagai revision_number sehingga publish kedua bentrok.
+   Sumber kebenaran Revisi Publikasi berikutnya = MAX(revision_number) pada cutoff_date tersebut + 1.
+   Sengaja TIDAK memakai getActivePublishedSnapshot()+1 (publikasi lama bisa diaktifkan kembali),
+   TIDAK memakai getPublishedSnapshotHistory(limit) (window terbatas), dan TIDAK memakai Source Revision.
+   ------------------------------------------------------------ */
+const PUBLISHED_SNAPSHOTS_TABLE = 'published_snapshots';
+function isPositiveInteger(value) { const n = Number(value); return Number.isInteger(n) && n > 0; }
+/**
+ * Revisi Publikasi berikutnya untuk satu cutoff date, diambil langsung dari database
+ * memakai client existing (window.SupabaseService.getClient()) dalam sesi Admin terautentikasi.
+ * FAIL-CLOSED: melempar error bila tidak dapat diperiksa — TIDAK PERNAH menebak atau
+ * diam-diam jatuh ke Source Revision.
+ */
+async function getNextPublicationRevision(cutoffDate) {
+  const cutoff = String(cutoffDate || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cutoff)) throw new Error('Revisi publikasi terbaru tidak dapat diperiksa: tanggal data tidak valid.');
+  if (!State.isAdmin || State.runtimeMode !== 'admin') throw new Error('Revisi publikasi terbaru tidak dapat diperiksa: akses admin diperlukan.');
+  if (!State.supabaseReady || !window.SupabaseService || typeof window.SupabaseService.getClient !== 'function') {
+    throw new Error('Revisi publikasi terbaru tidak dapat diperiksa: koneksi Supabase belum siap.');
+  }
+  const client = window.SupabaseService.getClient();
+  if (!client || typeof client.from !== 'function') throw new Error('Revisi publikasi terbaru tidak dapat diperiksa: client Supabase tidak tersedia.');
+  // Query ringan: satu kolom, satu baris, tanpa payload_json.
+  const { data, error } = await client
+    .from(PUBLISHED_SNAPSHOTS_TABLE)
+    .select('revision_number')
+    .eq('cutoff_date', cutoff)
+    .order('revision_number', { ascending: false })
+    .limit(1);
+  if (error) throw new Error(`Revisi publikasi terbaru tidak dapat diperiksa: ${safeUserError(error, 'query database gagal')}`);
+  const rows = Array.isArray(data) ? data : [];
+  if (!rows.length) return 1; // belum pernah ada publikasi untuk cutoff ini
+  const latest = Number(rows[0] && rows[0].revision_number);
+  if (!Number.isFinite(latest)) throw new Error('Revisi publikasi terbaru tidak dapat diperiksa: nomor revisi database tidak valid.');
+  const next = Math.floor(latest) + 1;
+  if (!isPositiveInteger(next)) throw new Error('Revisi publikasi terbaru tidak dapat diperiksa: nomor revisi berikutnya tidak valid.');
+  return next;
+}
+// Revisi Data (Source Revision) pada snapshot lokal aktif.
+function currentSourceRevisionNumber() { return getSnapshotRevisionNumber(State.activeSnapshot); }
+// Deteksi error bentrok UNIQUE(cutoff_date, revision_number) dari RPC/Postgres.
+function isDuplicateRevisionError(error) {
+  const message = String((error && (error.message || error.details || error.hint)) || '');
+  const code = String((error && error.code) || '');
+  return code === '23505' || /revisi yang sama sudah tersedia|duplicate key|already exists|unique constraint/i.test(message);
+}
 // Kandidat pembanding diambil SEKALI saat dialog dibuka (tidak diulang tiap perubahan checkbox).
 async function fetchPublishComparisonCandidate() {
   try {
@@ -4582,9 +4646,12 @@ async function fetchPublishComparisonCandidate() {
  * Membangun payload publikasi yang SUDAH disanitasi menurut Publish Scope.
  * comparisonCandidate = kandidat canonical dari publikasi aktif saat ini (boleh null).
  */
-function buildPublishedPayloadForScope(regions, comparisonCandidate) {
+function buildPublishedPayloadForScope(regions, comparisonCandidate, publicationRevisionNumber) {
   if (!requireAdmin('memublikasikan data')) throw new Error('Akses admin diperlukan.');
   if (!State.activeSnapshot) throw new Error('Snapshot lokal aktif wajib tersedia.');
+  // Revisi Publikasi WAJIB berasal dari database (lihat getNextPublicationRevision). Tanpa nilai valid,
+  // payload tidak boleh dibangun — jangan pernah jatuh ke Source Revision.
+  if (!isPositiveInteger(publicationRevisionNumber)) throw new Error('Revisi publikasi terbaru tidak dapat diperiksa.');
   const regionKeySet = toRegionKeySet(regions);
   if (!regionKeySet.size) throw new Error('Pilih minimal satu Regional untuk dipublikasikan.');
 
@@ -4614,7 +4681,10 @@ function buildPublishedPayloadForScope(regions, comparisonCandidate) {
     publishedAt: new Date().toISOString(),
     metadata: {
       cutoffDate: activeSnapshot.cutoffDate,
-      revisionNumber: activeSnapshot.revisionNumber,
+      // revisionNumber = REVISI PUBLIKASI (dipakai sebagai p_revision_number oleh RPC existing).
+      revisionNumber: Number(publicationRevisionNumber),
+      // sourceRevisionNumber = REVISI DATA (opsional & non-breaking; payload lama boleh tidak punya).
+      sourceRevisionNumber: currentSourceRevisionNumber(),
       fileName: activeSnapshot.fileName,
       recordCount,
       eligibleCount,
@@ -4673,7 +4743,8 @@ async function buildPublishedPayload(regions) {
     ? getPublishScopeRegionOptions(State.activeSnapshot).map(option => option.value)
     : regions;
   const comparisonCandidate = await fetchPublishComparisonCandidate();
-  return buildPublishedPayloadForScope(scope, comparisonCandidate);
+  const publicationRevision = await getNextPublicationRevision(State.activeSnapshot.cutoffDate);
+  return buildPublishedPayloadForScope(scope, comparisonCandidate, publicationRevision);
 }
 function normalizeRemotePublication(remoteMeta, source, cachedAt) {
   const payload = remoteMeta && remoteMeta.payload_json ? remoteMeta.payload_json : remoteMeta && remoteMeta.payload;
@@ -4681,7 +4752,10 @@ function normalizeRemotePublication(remoteMeta, source, cachedAt) {
   return {
     id: String((remoteMeta && remoteMeta.id) || ''),
     cutoffDate: String((remoteMeta && remoteMeta.cutoff_date) || metadata.cutoffDate || ''),
+    // revisionNumber remote SELALU berarti REVISI PUBLIKASI.
     revisionNumber: Number((remoteMeta && remoteMeta.revision_number) || metadata.revisionNumber || 1),
+    // REVISI DATA: payload legacy belum punya sourceRevisionNumber -> fallback ke activeSnapshot.revisionNumber.
+    sourceRevisionNumber: Number(metadata.sourceRevisionNumber || (payload && payload.activeSnapshot && payload.activeSnapshot.revisionNumber) || 0) || null,
     publishedAt: String((remoteMeta && remoteMeta.published_at) || (payload && payload.publishedAt) || ''),
     fileName: String((remoteMeta && remoteMeta.file_name) || metadata.fileName || ''),
     recordCount: Number((remoteMeta && remoteMeta.record_count) || metadata.recordCount || 0),
@@ -4762,7 +4836,7 @@ function publicDataBannerHtml() {
   const sourceText = meta.source === 'cache' ? 'Cache Viewer' : 'Supabase';
   const publishedText = meta.publishedAt ? fmtDateTimeId(Date.parse(meta.publishedAt)) : '-';
   return `<div class="public-data-banner ${meta.source === 'cache' ? 'cache-source' : ''}">
-    <div><strong>Data per ${fmtDateId(meta.cutoffDate)}</strong> · Revisi ${fmtNumber(meta.revisionNumber)} · Dipublikasikan ${publishedText} · Sumber: ${sourceText}</div>
+    <div><strong>Data per ${fmtDateId(meta.cutoffDate)}</strong> · Publikasi Rev ${fmtNumber(meta.revisionNumber)}${meta.sourceRevisionNumber ? ` (Rev Data ${fmtNumber(meta.sourceRevisionNumber)})` : ''} · Dipublikasikan ${publishedText} · Sumber: ${sourceText}</div>
     ${State.remoteStatusMessage ? `<div>${escapeHtml(State.remoteStatusMessage)}</div>` : ''}
   </div>`;
 }
@@ -4859,13 +4933,16 @@ async function openPublishNationalDialog() {
   const regionOptions = getPublishScopeRegionOptions(State.activeSnapshot);
   if (!regionOptions.length) { showToast('Snapshot aktif tidak memiliki data Regional.', 'error'); return; }
 
-  showLoadingOverlay('Menyiapkan payload publikasi...');
+  showLoadingOverlay('Memeriksa revisi publikasi...');
   let comparisonCandidate = null;
+  let publicationRevision = null;
   try {
     comparisonCandidate = await fetchPublishComparisonCandidate();
+    // Angka Revisi Publikasi TIDAK PERNAH ditebak: selalu dari database (MAX + 1).
+    publicationRevision = await getNextPublicationRevision(State.activeSnapshot.cutoffDate);
   } catch (error) {
     hideLoadingOverlay();
-    showToast(safeUserError(error, 'Payload publikasi gagal disiapkan.'), 'error');
+    showToast(safeUserError(error, 'Revisi publikasi terbaru tidak dapat diperiksa.'), 'error');
     return;
   }
 
@@ -4912,11 +4989,12 @@ async function openPublishNationalDialog() {
       return;
     }
     try {
-      previewPayload = buildPublishedPayloadForScope(selected, comparisonCandidate);
+      previewPayload = buildPublishedPayloadForScope(selected, comparisonCandidate, publicationRevision);
       const p = buildPublishScopePreview(previewPayload, toRegionKeySet(selected));
       previewEl.innerHTML = [
-        row('Tanggal cutoff', escapeHtml(previewPayload.metadata.cutoffDate)),
-        row('Revision', fmtNumber(previewPayload.metadata.revisionNumber)),
+        row('Tanggal Data', escapeHtml(fmtDateId(previewPayload.metadata.cutoffDate))),
+        row('Revisi Data', fmtNumber(previewPayload.metadata.sourceRevisionNumber)),
+        row('Revisi Publikasi', `<strong>${fmtNumber(previewPayload.metadata.revisionNumber)}</strong>`),
         row('File sumber', escapeHtml(previewPayload.metadata.fileName)),
         row('Regional', `${fmtNumber(p.regionPublic)} / ${fmtNumber(p.regionSource)}`),
         row('Salesman', `${fmtNumber(p.salesmanPublic)} / ${fmtNumber(p.salesmanSource)}`),
@@ -4974,32 +5052,54 @@ async function openPublishNationalDialog() {
     if (State.publicationBusy || confirmBtn.disabled) return;
     schedulePreview.cancel();
     errorEl.textContent = '';
-    // GUARD TERHADAP STALE UI: payload FINAL SELALU dibangun ulang & divalidasi ulang dari
-    // pilihan checkbox terkini, bukan memakai object preview yang mungkin sudah usang.
-    let payload;
-    try {
-      const finalSelection = optionCbs().filter(cb => cb.checked).map(cb => cb.value);
-      if (!finalSelection.length) throw new Error('Pilih minimal satu Regional untuk dipublikasikan.');
-      payload = buildPublishedPayloadForScope(finalSelection, comparisonCandidate);
-      validatePublishScopeIsolation(payload, toRegionKeySet(finalSelection));
-    } catch (error) {
-      errorEl.textContent = safeUserError(error, 'Payload publikasi tidak lolos validasi cakupan Regional.');
-      return;
-    }
+    const finalSelection = optionCbs().filter(cb => cb.checked).map(cb => cb.value);
+    if (!finalSelection.length) { errorEl.textContent = 'Pilih minimal satu Regional untuk dipublikasikan.'; return; }
+    const regionKeySet = toRegionKeySet(finalSelection);
     State.publicationBusy = true;
     confirmBtn.disabled = true;
     const originalLabel = confirmBtn.textContent;
     confirmBtn.textContent = 'Memublikasikan...';
+    // GUARD TERHADAP STALE UI/REVISI: payload FINAL SELALU dibangun ulang dari checkbox terkini
+    // DAN Revisi Publikasi di-query ulang (session/admin lain bisa saja sudah publish sejak modal dibuka).
+    const buildFinalPayload = async () => {
+      const freshRevision = await getNextPublicationRevision(State.activeSnapshot.cutoffDate);
+      publicationRevision = freshRevision;
+      const finalPayload = buildPublishedPayloadForScope(finalSelection, comparisonCandidate, freshRevision);
+      validatePublishedPayload(finalPayload);
+      validatePublishScopeIsolation(finalPayload, regionKeySet);
+      return finalPayload;
+    };
     try {
-      const snapshotId = await window.SupabaseService.publishNationalSnapshot(payload, payload.metadata);
+      let payload;
+      try {
+        payload = await buildFinalPayload();
+      } catch (error) {
+        errorEl.textContent = safeUserError(error, 'Payload publikasi tidak lolos validasi cakupan Regional.');
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = originalLabel;
+        return;
+      }
+      let snapshotId;
+      try {
+        snapshotId = await window.SupabaseService.publishNationalSnapshot(payload, payload.metadata);
+      } catch (error) {
+        // SATU retry aman KHUSUS bentrok UNIQUE(cutoff_date, revision_number) akibat race condition:
+        // ambil revisi terbaru lagi, bangun ulang payload, coba sekali. Tidak pernah menimpa/menghapus
+        // publikasi lama dan tidak pernah retry berulang.
+        if (!isDuplicateRevisionError(error)) throw error;
+        const retryPayload = await buildFinalPayload();
+        snapshotId = await window.SupabaseService.publishNationalSnapshot(retryPayload, retryPayload.metadata);
+        payload = retryPayload;
+      }
       State.remotePublication = normalizeRemotePublication(await window.SupabaseService.getActivePublishedSnapshot(), 'supabase');
       overlay.querySelector('[data-act="close"]').click();
-      showToast(`Publikasi berhasil (${fmtNumber(payload.metadata.publishScope.includedRegionCount)} Regional). Snapshot ID: ${snapshotId}`, 'success');
+      showToast(`Publikasi berhasil — Rev Publikasi ${fmtNumber(payload.metadata.revisionNumber)} (${fmtNumber(payload.metadata.publishScope.includedRegionCount)} Regional). Snapshot ID: ${snapshotId}`, 'success');
       renderTopbar(parseHash().path, parseHash().params);
     } catch (error) {
       errorEl.textContent = safeUserError(error, 'Publikasi gagal.');
       confirmBtn.disabled = false;
       confirmBtn.textContent = originalLabel;
+      renderPreview();
     } finally {
       State.publicationBusy = false;
     }
@@ -5019,7 +5119,7 @@ async function wirePublicationHistoryPage() {
       return;
     }
     container.innerHTML = `<div class="dt-scroll"><table class="dt-table"><thead><tr>
-      <th>Cutoff</th><th>Revision</th><th>Dipublikasikan</th><th>File</th><th>Record</th><th>Eligible</th><th>Status</th><th>Aksi</th>
+      <th>Cutoff</th><th>Rev Publikasi</th><th>Dipublikasikan</th><th>File</th><th>Record</th><th>Eligible</th><th>Status</th><th>Aksi</th>
       </tr></thead><tbody>${rows.map(row => `<tr>
         <td>${fmtDateId(row.cutoff_date)}</td><td>${fmtNumber(row.revision_number)}</td><td>${fmtDateTimeId(Date.parse(row.published_at))}</td>
         <td>${escapeHtml(row.file_name || '-')}</td><td>${fmtNumber(row.record_count)}</td><td>${fmtNumber(row.eligible_count)}</td>
@@ -5137,7 +5237,7 @@ function renderLegacySnapshotState() {
     <div class="legacy-snapshot-info" style="display:inline-grid;gap:6px;text-align:left;background:#fff;border:1px solid var(--card-border);border-radius:10px;padding:12px 16px;margin:6px 0 16px;min-width:320px;">
       <div><strong>File:</strong> ${escapeHtml(snapshot.fileName || '-')}</div>
       <div><strong>Tanggal Data:</strong> ${snapshot.cutoffDate ? fmtDateId(snapshot.cutoffDate) : '-'}</div>
-      <div><strong>Revisi:</strong> ${snapshot.revisionNumber || 1}</div>
+      <div><strong>Revisi Data:</strong> ${snapshot.revisionNumber || 1}</div>
     </div>
     <p>Upload file Excel baru yang memiliki kolom <strong>TOTAL CALL ESUITE</strong>, lalu tekan <strong>Simpan dan Gunakan Data</strong>.</p>
     <button class="btn btn-primary" id="goto-upload-legacy-btn">Upload File Baru</button>
@@ -5241,7 +5341,7 @@ function openActiveDataPopover(button) {
     <div class="topbar-data-popover-grid">
       <div class="topbar-data-popover-label">File</div><div class="topbar-data-popover-value">${escapeHtml(snapshot.fileName || '-')}</div>
       <div class="topbar-data-popover-label">Tanggal data</div><div class="topbar-data-popover-value">${fmtDateId(snapshot.cutoffDate)}</div>
-      <div class="topbar-data-popover-label">Revisi</div><div class="topbar-data-popover-value">${fmtNumber(snapshot.revisionNumber || 1)}</div>
+      <div class="topbar-data-popover-label">Revisi Data</div><div class="topbar-data-popover-value">${fmtNumber(snapshot.revisionNumber || 1)}</div>
       <div class="topbar-data-popover-label">Waktu upload</div><div class="topbar-data-popover-value">${fmtDateTimeId(snapshot.uploadedAt)}</div>
       <div class="topbar-data-popover-label">Phase aktif</div><div class="topbar-data-popover-value">${escapeHtml(State.activePhaseFilters.size ? globalPhaseFilterValues().join(', ') : 'Semua Phase')}</div>
       <div class="topbar-data-popover-label">Regional aktif</div><div class="topbar-data-popover-value">${escapeHtml(State.activeRegionFilters.size ? globalRegionFilterValues().join(', ') : 'Semua Regional')}</div>
@@ -8881,7 +8981,7 @@ function renderRiwayatTable() {
       { key: 'totalRead', label: 'Salesman', align: 'right', sortable: true, render: r => fmtNumber(r.totalRead) },
       { key: 'totalEligible', label: 'Data Valid', align: 'right', sortable: true, render: r => fmtNumber(r.totalEligible) },
       { key: 'totalNotEligible', label: 'Data Bermasalah', align: 'right', sortable: true, render: r => fmtNumber(r.totalNotEligible) },
-      { key: 'revisionNumber', label: 'Revisi', align: 'right', sortable: true, render: r => r.revisionNumber || 1 },
+      { key: 'revisionNumber', label: 'Revisi Data', align: 'right', sortable: true, render: r => r.revisionNumber || 1 },
       { key: 'dataSchemaVersion', label: 'Struktur EC vs Call', sortable: true, render: r => isLegacyHitRateSnapshot(r) ? '<span class="badge cat-critical">Formula Lama</span>' : '<span class="badge cat-perfect">Total Call Esuite</span>' },
       { key: 'tatFormulaVersion', label: 'Formula TAT', sortable: true, render: r => isLegacyTatSnapshot(r) ? '<span class="badge cat-needimprove">Legacy</span>' : `<span class="badge cat-perfect">${fmtPercent(r.tatMtd)}</span>` },
       { key: 'isActive', label: 'Status', sortable: true, render: r => r.isActive ? '<span class="badge cat-perfect">Sedang Digunakan</span>' : '<span class="badge badge-muted">Tersimpan</span>' },
