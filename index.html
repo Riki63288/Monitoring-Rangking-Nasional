@@ -462,6 +462,7 @@ select:focus,input:focus{outline:2px solid var(--gold);outline-offset:1px;}
 /* ===== DataTable ===== */
 .dt-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;}
 .dt-toolbar-right{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+.dt-ranking-tat-info{flex:0 0 100%;text-align:right;font-size:12.5px;font-weight:700;letter-spacing:.2px;color:#0f766e;margin:-4px 2px 0;}
 .dt-pagesize-label{font-size:12px;color:var(--ink-soft);display:flex;gap:6px;align-items:center;}
 .dt-search-input{min-width:230px;}
 .dt-toolbar select,.dt-toolbar input[type=search],.dt-toolbar .btn{height:36px;box-sizing:border-box;}
@@ -1141,8 +1142,10 @@ const APP_CONFIG = {
   STORE_MASTER_CABANG: 'masterCabang',
   STORE_VIEWER_CACHE: 'viewerCache',
   CURRENT_DATA_SCHEMA_VERSION: 4,
-  CURRENT_HIT_RATE_SOURCE: 'totalCallDay',
-  CURRENT_HIT_RATE_FORMULA_VERSION: 'avgEc_div_totalCallDay_v1',
+  // EC vs Call Total memakai TOTAL CALL ESUITE sebagai denominator resmi.
+  // TOTAL CALL/DAY tetap diparse sebagai support field, tetapi TIDAK dipakai untuk KPI/scoring/eligibility.
+  CURRENT_HIT_RATE_SOURCE: 'totalCallEsuite',
+  CURRENT_HIT_RATE_FORMULA_VERSION: 'avgEc_div_totalCallEsuite_v1',
   CURRENT_TAT_SOURCE: 'tatMtd',
   CURRENT_TAT_FORMULA_VERSION: 'achievement_div_tat_v1',
   STORE_SETTINGS: 'settings',
@@ -1170,11 +1173,12 @@ const APP_CONFIG = {
     { key: 'roa', aliases: ['ROA'], fallbackCol: 13, type: 'number', group: 'kpi' },
     { key: 'pctAchMtdRoaCb', aliases: ['%ACH MTD'], fallbackCol: 14, type: 'percent', group: 'kpi' },
 
-    { key: 'totalCallDay', aliases: ['TOTAL CALL/DAY', 'TOTAL CALL / DAY'], fallbackCol: 18, type: 'number', group: 'kpi' },
+    // TOTAL CALL/DAY tetap diparse (support field / informasi), TIDAK lagi menjadi sumber KPI EC vs Call Total.
+    { key: 'totalCallDay', aliases: ['TOTAL CALL/DAY', 'TOTAL CALL / DAY'], fallbackCol: 18, type: 'number', group: 'support' },
     { key: 'tgtScJks', aliases: ['TGT SC JKS'], fallbackCol: 19, type: 'number', group: 'kpi' },
     { key: 'achScVsJks', aliases: ['ACH SC VS JKS'], fallbackCol: 20, type: 'number', group: 'kpi' },
     { key: 'pctAchScVsJks', aliases: ['%ACH SC VS JKS'], fallbackCol: 21, type: 'percent', group: 'kpi' },
-    { key: 'totalCallEsuite', aliases: ['TOTAL CALL ESUITE', 'TOTAL CALL E-SUITE', 'TOTAL CALL E SUITE', 'TOTAL CALL ESUITE/DAY'], fallbackCol: 22, type: 'number', group: 'support' },
+    { key: 'totalCallEsuite', aliases: ['TOTAL CALL ESUITE', 'TOTAL CALL E-SUITE', 'TOTAL CALL E SUITE', 'TOTAL CALL ESUITE/DAY'], fallbackCol: 22, type: 'number', group: 'kpi' },
 
     { key: 'geofencing', aliases: ['GEOFANCING', 'GEOFENCING'], fallbackCol: 25, type: 'number', group: 'kpi' },
     { key: 'pctAchGeofencing', aliases: ['%ACH GEOFANCING', '%ACH GEOFANCING'], fallbackCol: 26, type: 'percent', group: 'kpi' },
@@ -1216,8 +1220,8 @@ const APP_CONFIG = {
       info: '≥90% Perfect, 85-89.99% Good, <85% Perlu Ditingkatkan.',
       categoryFn: (v) => v >= 90 ? { label: 'Perfect', cls: 'cat-perfect' } : v >= 85 ? { label: 'Good', cls: 'cat-good' } : { label: 'Perlu Ditingkatkan', cls: 'cat-bad' } },
     { id: 'hitRate', label: 'EC vs Call Total', group: 'productivity', groupLabel: 'Productivity', defaultWeight: 10,
-      formula: 'AVG EC ÷ TOTAL CALL/DAY × 100%', computeSalesman: (r) => safeDivide(r.avgEc, r.totalCallDay) === null ? null : safeDivide(r.avgEc, r.totalCallDay) * 100,
-      numeratorField: 'avgEc', denominatorField: 'totalCallDay',
+      formula: 'AVG EC ÷ TOTAL CALL ESUITE × 100%', computeSalesman: (r) => safeDivide(r.avgEc, r.totalCallEsuite) === null ? null : safeDivide(r.avgEc, r.totalCallEsuite) * 100,
+      numeratorField: 'avgEc', denominatorField: 'totalCallEsuite',
       info: '100% Perfect, 80-99.99% Sangat Bagus, 70-79.99% Good, <70% Perlu Ditingkatkan.',
       categoryFn: (v) => v >= 100 ? { label: 'Perfect', cls: 'cat-perfect' } : v >= 80 ? { label: 'Sangat Bagus', cls: 'cat-great' } : v >= 70 ? { label: 'Good', cls: 'cat-good' } : { label: 'Perlu Ditingkatkan', cls: 'cat-bad' } },
     { id: 'avgEcAch', label: 'Golden EC', group: 'productivity', groupLabel: 'Productivity', defaultWeight: 15,
@@ -1565,6 +1569,16 @@ const COUNTIF_INDICATORS = [
   { id: 'finalScore', label: 'Final Score', type: 'plain', getValue: row => countifSafeNumber(row && row.finalScore) }
 ];
 function getCountifIndicatorById(id) { return COUNTIF_INDICATORS.find(i => i.id === id) || COUNTIF_INDICATORS[0]; }
+// Indicator yang boleh dipilih Viewer: indicator yang merepresentasikan kolom Admin-only disembunyikan
+// agar Viewer tidak dapat mengungkap nilai target/aktual nominal lewat Countif atau sorting.
+function visibleCountifIndicators() {
+  if (isRankingAdminView()) return COUNTIF_INDICATORS;
+  return COUNTIF_INDICATORS.filter(i => !ADMIN_ONLY_COUNTIF_INDICATOR_IDS.has(i.id));
+}
+function resolveVisibleCountifIndicatorId(id) {
+  const list = visibleCountifIndicators();
+  return list.some(i => i.id === id) ? id : list[0].id;
+}
 function getCountifState(level) {
   if (!level) return {};
   if (!State.rankingThresholds[level]) State.rankingThresholds[level] = {};
@@ -1974,6 +1988,43 @@ function compareMasterCabangWithActiveData(dedupedRows) {
   return { notFoundInMaster, regionDiffs };
 }
 
+/* ------------------------------------------------------------
+   HARI KERJA (HK) MTD — SUMBER RESMI: sheet "Detail persalesman" cell G2.
+   HK TIDAK dihitung dari cutoff date, jumlah hari kalender, atau baris data Salesman.
+   HK adalah INFORMASI saja dan TIDAK pernah masuk formula KPI/score/%TAT.
+   ------------------------------------------------------------ */
+const WORKDAY_MTD_CELL = 'G2';
+const WORKDAY_MTD_COL_INDEX = 6;  // kolom G (0-based)
+const WORKDAY_MTD_ROW_INDEX = 1;  // baris 2 (0-based)
+// Menerima 18, "18", 18.0, " 18 ", "18,0". Menolak kosong, 0, negatif, >31, pecahan (18.5), teks, dan #VALUE!.
+function normalizeWorkdayMtdValue(raw) {
+  if (raw === null || raw === undefined || typeof raw === 'boolean') return null;
+  let numeric;
+  if (typeof raw === 'number') numeric = raw;
+  else {
+    const text = String(raw).trim();
+    if (!text) return null;
+    if (!/^[+-]?\d+(?:[.,]0+)?$/.test(text)) return null; // hanya bilangan bulat (boleh berakhiran ,0 / .0)
+    numeric = Number(text.replace(',', '.'));
+  }
+  if (!Number.isFinite(numeric) || !Number.isInteger(numeric)) return null;
+  if (numeric <= 0 || numeric > 31) return null;
+  return numeric;
+}
+function isValidWorkdayMtdValue(value) { return normalizeWorkdayMtdValue(value) !== null; }
+function readWorkdayMtdFromSheet(sheet, rows) {
+  if (sheet && typeof sheet === 'object') {
+    const cell = sheet[WORKDAY_MTD_CELL];
+    if (cell) {
+      if (cell.t === 'e') return null; // cell error (#VALUE!, #REF!, dst) -> jangan mengarang HK
+      const fromValue = normalizeWorkdayMtdValue(cell.v);
+      if (fromValue !== null) return fromValue;
+      return normalizeWorkdayMtdValue(cell.w); // formatted value sebagai cadangan pembacaan
+    }
+  }
+  const row = Array.isArray(rows) && rows.length > WORKDAY_MTD_ROW_INDEX ? rows[WORKDAY_MTD_ROW_INDEX] : null;
+  return row ? normalizeWorkdayMtdValue(row[WORKDAY_MTD_COL_INDEX]) : null;
+}
 function parseExcelWorkbook(arrayBuffer) {
   const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: false });
   const sheetName = findTargetSheet(workbook);
@@ -2017,7 +2068,9 @@ function parseExcelWorkbook(arrayBuffer) {
     rec.namaSalesman = rec.namaSalesmanAktif;
     rawRecords.push(rec);
   }
-  return { sheetName, headerRowIndex: headerRowIdx, dataStartRow: dataStart + 1, colIndexMap, matchedByName, notFound, rawRecords, skippedTemplateRows, totalRowsScanned: rows.length };
+  // HK MTD dibaca langsung dari cell G2 sheet yang sama (bukan dari baris data Salesman).
+  const workdayMtd = readWorkdayMtdFromSheet(sheet, rows);
+  return { sheetName, headerRowIndex: headerRowIdx, dataStartRow: dataStart + 1, colIndexMap, matchedByName, notFound, rawRecords, skippedTemplateRows, totalRowsScanned: rows.length, workdayMtd };
 }
 
 /* ============================================================
@@ -2054,8 +2107,10 @@ function validateRow(rec) {
   if (rec.geofencing === null || isNaN(rec.geofencing)) reasons.push({ field: 'geofencing', message: 'GEOFANCING bukan angka valid', value: rec.geofencing });
   if (!(rec.cb > 0)) reasons.push({ field: 'cb', message: 'CB harus lebih dari 0', value: rec.cb });
   if (rec.roa === null || isNaN(rec.roa)) reasons.push({ field: 'roa', message: 'ROA bukan angka valid', value: rec.roa });
-  const totalCallDayReason = validatePositiveNumberField(rec, 'totalCallDay', 'TOTAL CALL/DAY');
-  if (totalCallDayReason) reasons.push(totalCallDayReason);
+  // Denominator KPI EC vs Call Total = TOTAL CALL ESUITE. TOTAL CALL/DAY sengaja TIDAK divalidasi di sini
+  // agar baris dengan TOTAL CALL/DAY error/#VALUE!/kosong (mis. kasus Pare-Pare) tetap eligible.
+  const totalCallEsuiteReason = validatePositiveNumberField(rec, 'totalCallEsuite', 'TOTAL CALL ESUITE');
+  if (totalCallEsuiteReason) reasons.push(totalCallEsuiteReason);
   if (rec.avgEc === null || isNaN(rec.avgEc)) reasons.push({ field: 'avgEc', message: 'AVG EC (EPD MTD) bukan angka valid', value: rec.avgEc });
   if (!(rec.tgtOmsFm > 0)) reasons.push({ field: 'tgtOmsFm', message: 'Target Revenue (Tgt Oms FM) harus lebih dari 0', value: rec.tgtOmsFm });
   if (rec.mtdOmsFm === null || isNaN(rec.mtdOmsFm)) reasons.push({ field: 'mtdOmsFm', message: 'Revenue aktual (MTD Oms FM) bukan angka valid', value: rec.mtdOmsFm });
@@ -2222,7 +2277,7 @@ function aggregateByGroup(eligibleRecords, allRecords, keyFn, metaFn, settings) 
     if (!groups.has(key)) {
       groups.set(key, {
         key, meta: metaFn(rec), totalSalesman: 0, eligibleSalesman: 0, notEligibleSalesman: 0,
-        sums: { achScVsJks: 0, tgtScJks: 0, geofencing: 0, roa: 0, cb: 0, avgEc: 0, totalCallDay: 0, mtdOmsFm: 0, tgtOmsFm: 0, achEpbPoinRoa: 0, tgtEpbStrata2: 0 },
+        sums: { achScVsJks: 0, tgtScJks: 0, geofencing: 0, roa: 0, cb: 0, avgEc: 0, totalCallDay: 0, totalCallEsuite: 0, mtdOmsFm: 0, tgtOmsFm: 0, achEpbPoinRoa: 0, tgtEpbStrata2: 0 },
         tatMtd: isValidTatMtdValue(rec && rec.tatMtd) ? Number(rec.tatMtd) : null,
         eligibleMembers: []
       });
@@ -2235,7 +2290,7 @@ function aggregateByGroup(eligibleRecords, allRecords, keyFn, metaFn, settings) 
     const s = g.sums;
     s.achScVsJks += num(rec.achScVsJks); s.tgtScJks += num(rec.tgtScJks);
     s.geofencing += num(rec.geofencing); s.roa += num(rec.roa); s.cb += num(rec.cb);
-    s.avgEc += num(rec.avgEc); s.totalCallDay += num(rec.totalCallDay);
+    s.avgEc += num(rec.avgEc); s.totalCallDay += num(rec.totalCallDay); s.totalCallEsuite += num(rec.totalCallEsuite);
     s.mtdOmsFm += num(rec.mtdOmsFm); s.tgtOmsFm += num(rec.tgtOmsFm);
     s.achEpbPoinRoa += num(rec.achEpbPoinRoa); s.tgtEpbStrata2 += num(rec.tgtEpbStrata2);
   });
@@ -2252,7 +2307,8 @@ function computeGroupKpisAndScore(g, settings) {
     scJks: pctv(safeDivide(s.achScVsJks, s.tgtScJks)),
     geofencing: pctv(safeDivide(s.geofencing, s.achScVsJks)),
     roaCb: pctv(safeDivide(s.roa, s.cb)),
-    hitRate: pctv(safeDivide(s.avgEc, s.totalCallDay)),
+    // Agregat = SUM(AVG EC) ÷ SUM(TOTAL CALL ESUITE) × 100% (bukan rata-rata persentase Salesman).
+    hitRate: pctv(safeDivide(s.avgEc, s.totalCallEsuite)),
     avgEcAch: pctv(safeDivide(s.avgEc, settings.avgEcTarget * eligibleCount)),
     revenue: pctv(safeDivide(s.mtdOmsFm, s.tgtOmsFm)),
     strata2: pctv(safeDivide(s.achEpbPoinRoa, s.tgtEpbStrata2))
@@ -2824,7 +2880,7 @@ class DataTable {
     this.countifEntityLabel = opts.countifEntityLabel || '';
     if (this.countifEnabled) {
       const saved = getCountifState(this.countifLevel);
-      this.countifIndicatorId = saved.indicatorId || COUNTIF_INDICATORS[0].id;
+      this.countifIndicatorId = resolveVisibleCountifIndicatorId(saved.indicatorId || COUNTIF_INDICATORS[0].id);
       this.countifThresholdRaw = saved.thresholdRaw || '';
       this.countifActiveFilter = saved.activeFilter === 'gte' || saved.activeFilter === 'lt' ? saved.activeFilter : null;
       this._persistCountifState = () => saveCountifState(this.countifLevel, {
@@ -2853,7 +2909,7 @@ class DataTable {
     this._floatingHeaderVisible = false;
     this._destroyed = false;
   }
-  getCountifIndicator() { return getCountifIndicatorById(this.countifIndicatorId); }
+  getCountifIndicator() { return getCountifIndicatorById(resolveVisibleCountifIndicatorId(this.countifIndicatorId)); }
   getCountifThresholdValue() {
     if (!this.countifEnabled) return null;
     if (this.countifThresholdRaw === null || this.countifThresholdRaw === undefined || String(this.countifThresholdRaw).trim() === '') return null;
@@ -2891,7 +2947,7 @@ class DataTable {
       <button type="button" class="countif-chip countif-chip-gte ${gteActive ? 'active' : ''} ${disabledCls}" data-countif="gte" ${hasValidThreshold ? '' : 'disabled'}>${gteLabel}</button>
       <button type="button" class="countif-chip countif-chip-lt ${ltActive ? 'active' : ''} ${disabledCls}" data-countif="lt" ${hasValidThreshold ? '' : 'disabled'}>${ltLabel}</button>
       <select class="countif-indicator-select" aria-label="Indikator Analisis Nilai">
-        ${COUNTIF_INDICATORS.map(ind => `<option value="${ind.id}" ${ind.id === this.countifIndicatorId ? 'selected' : ''}>${escapeHtml(ind.label)}</option>`).join('')}
+        ${visibleCountifIndicators().map(ind => `<option value="${ind.id}" ${ind.id === this.countifIndicatorId ? 'selected' : ''}>${escapeHtml(ind.label)}</option>`).join('')}
       </select>
       <input type="text" class="countif-threshold-input ${indicator.type === 'money' ? 'is-money' : ''}" inputmode="${indicator.type === 'money' ? 'text' : 'decimal'}" placeholder="${placeholder}" value="${escapeHtml(this.countifThresholdRaw)}" aria-label="Nilai ambang Analisis Nilai" />
     </div>`;
@@ -3207,7 +3263,8 @@ class DataTable {
         ${this.enableHeaderFilters ? `<button class="btn btn-sm btn-outline dt-reset-filters" ${view.hasActiveHeaderFilters ? '' : 'hidden'}>↺ Reset Filter</button>` : ''}
         <button class="btn btn-sm btn-outline dt-export">⬇ Export CSV</button>
         ${this.jpgEnabled ? `<button class="btn btn-sm btn-outline dt-jpg" aria-label="Download tabel sebagai JPG" ${this._jpgBusy ? 'disabled' : ''}>${this._jpgBusy ? 'Menyiapkan JPG...' : '🖼 Download JPG'}</button>` : ''}
-      </div>`;
+      </div>
+      ${this.isRankingTable ? tatTodayInfoHtml() : ''}`;
 
     const scrollWrap = document.createElement('div'); scrollWrap.className = `dt-scroll${view.hasGroupedHeader ? ' dt-scroll-sticky' : ''}${this.mainRankingScroll ? ' dt-ranking-main-scroll' : ''}`;
     const table = document.createElement('table');
@@ -3573,6 +3630,7 @@ class DataTable {
     const headers = exportColumns.map(c => c.label);
     const rows = this.getFiltered().map(r => exportColumns.map(c => (c.csvValue ? c.csvValue(r) : c.render(r).replace(/<[^>]+>/g, ''))));
     const metadata = [...statusSalesmanCsvMetadataRows()];
+    if (this.isRankingTable) { const tatText = tatTodayLabelText(); if (tatText) metadata.push(['TAT Hari Ini', tatText.replace('TAT Hari Ini: ', '')]); }
     if (typeof this.jpgFilterSummary === 'function') {
       this.jpgFilterSummary().forEach(chip => {
         const idx = String(chip).indexOf(':');
@@ -3976,6 +4034,8 @@ class DataTable {
       const baseFilterSummary = typeof this.jpgFilterSummary === 'function' ? this.jpgFilterSummary() : this.jpgFilterSummary;
       const quickLabels = { bottom3: 'Bottom 3', critical: 'Critical', need: 'Need Improvement', goodplus: 'Good+' };
       const filterSummary = [...(baseFilterSummary || [])];
+      // Informasi TAT global juga dibawa ke JPG Ranking (kolom %TAT tetap per entitas).
+      if (this.isRankingTable) { const tatText = tatTodayLabelText(); if (tatText) filterSummary.push(tatText); }
       if (this.quickStatusEnabled && this.quickStatusFilter !== 'all') filterSummary.push(`Status: ${quickLabels[this.quickStatusFilter] || this.quickStatusFilter}`);
       if (this.countifEnabled && (this.countifActiveFilter === 'gte' || this.countifActiveFilter === 'lt')) {
         const countifThreshold = this.getCountifThresholdValue();
@@ -4236,6 +4296,9 @@ function canonicalSnapshot(snapshot) {
     tatMtd: isValidTatMtdValue(snapshot.tatMtd) ? Number(snapshot.tatMtd) : null,
     tatSourceKey: snapshot.tatSourceKey || null,
     tatFormulaVersion: snapshot.tatFormulaVersion || null,
+    // HK MTD (informasi, bukan bagian formula). Snapshot legacy tanpa HK -> null, TIDAK dikarang.
+    workdayMtd: normalizeWorkdayMtdValue(snapshot.workdayMtd),
+    workdaySourceCell: normalizeWorkdayMtdValue(snapshot.workdayMtd) === null ? null : String(snapshot.workdaySourceCell || WORKDAY_MTD_CELL),
     rawRecords: Array.isArray(snapshot.rawRecords) ? snapshot.rawRecords : []
   };
 }
@@ -4296,6 +4359,7 @@ async function buildPublishedPayload() {
       eligibleCount,
       tatMtd: activeSnapshot.tatMtd,
       tatFormulaVersion: activeSnapshot.tatFormulaVersion,
+      workdayMtd: activeSnapshot.workdayMtd,
     },
     activeSnapshot,
     comparisonSnapshot,
@@ -4674,13 +4738,13 @@ function router() {
 function renderLegacySnapshotState() {
   const snapshot = State.activeSnapshot || {};
   return `<div class="empty-state"><div class="empty-state-icon">⚠️</div><h2>Struktur EC vs Call Total Lama</h2>
-    <p>Snapshot aktif masih menggunakan formula lama <strong>TOTAL CALL ESUITE</strong> dan belum dapat dipakai untuk EC vs Call Total berbasis TOTAL CALL/DAY.</p>
+    <p>Snapshot aktif masih menggunakan formula lama dan belum dapat dipakai untuk EC vs Call Total berbasis <strong>TOTAL CALL ESUITE</strong>.</p>
     <div class="legacy-snapshot-info" style="display:inline-grid;gap:6px;text-align:left;background:#fff;border:1px solid var(--card-border);border-radius:10px;padding:12px 16px;margin:6px 0 16px;min-width:320px;">
       <div><strong>File:</strong> ${escapeHtml(snapshot.fileName || '-')}</div>
       <div><strong>Tanggal Data:</strong> ${snapshot.cutoffDate ? fmtDateId(snapshot.cutoffDate) : '-'}</div>
       <div><strong>Revisi:</strong> ${snapshot.revisionNumber || 1}</div>
     </div>
-    <p>Upload file Excel baru yang memiliki kolom <strong>TOTAL CALL/DAY</strong>, lalu tekan <strong>Simpan dan Gunakan Data</strong>.</p>
+    <p>Upload file Excel baru yang memiliki kolom <strong>TOTAL CALL ESUITE</strong>, lalu tekan <strong>Simpan dan Gunakan Data</strong>.</p>
     <button class="btn btn-primary" id="goto-upload-legacy-btn">Upload File Baru</button>
     <button class="btn btn-outline" id="goto-riwayat-legacy-btn" style="margin-left:8px;">Lihat Riwayat Upload</button></div>`;
 }
@@ -4786,7 +4850,7 @@ function openActiveDataPopover(button) {
       <div class="topbar-data-popover-label">Phase aktif</div><div class="topbar-data-popover-value">${escapeHtml(State.activePhaseFilter || 'Semua Phase')}</div>
       <div class="topbar-data-popover-label">Data valid</div><div class="topbar-data-popover-value">${fmtNumber(State.validation.totalEligible || 0)}</div>
       <div class="topbar-data-popover-label">Bermasalah</div><div class="topbar-data-popover-value">${fmtNumber(State.validation.totalNotEligible || 0)}</div>
-      <div class="topbar-data-popover-label">EC vs Call Total</div><div class="topbar-data-popover-value">TOTAL CALL/DAY</div>
+      <div class="topbar-data-popover-label">EC vs Call Total</div><div class="topbar-data-popover-value">TOTAL CALL ESUITE</div>
       <div class="topbar-data-popover-label">TAT MTD</div><div class="topbar-data-popover-value">${isValidTatMtdValue(snapshot.tatMtd) ? fmtPercent(snapshot.tatMtd) : '-'}</div>
       <div class="topbar-data-popover-label">Pembanding</div><div class="topbar-data-popover-value">${escapeHtml(comparisonSnapshotLabel())}</div>
     </div>
@@ -5251,13 +5315,61 @@ function rankingTatMtd(row) {
   const value = row && isValidTatMtdValue(row.tatMtd) ? row.tatMtd : (row && row.rec && isValidTatMtdValue(row.rec.tatMtd) ? row.rec.tatMtd : null);
   return isValidTatMtdValue(value) ? Number(value) : null;
 }
+/* ------------------------------------------------------------
+   INFORMASI TAT GLOBAL ("TAT Hari Ini")
+   Nilai ini adalah pace perusahaan pada snapshot yang sedang dilihat — BUKAN isi kolom %TAT.
+   Kolom %TAT tetap dihitung per entitas melalui rankingTatAchievement().
+   ------------------------------------------------------------ */
+function activeSnapshotWorkdayMtd(snapshot) {
+  const snap = snapshot || State.activeSnapshot;
+  if (!snap) return null;
+  // Sumber resmi HK = Detail persalesman!G2 yang tersimpan pada snapshot sebagai workdayMtd.
+  // Snapshot legacy tidak memilikinya -> null (UI menampilkan "- HK"), HK TIDAK PERNAH dikarang
+  // dari cutoff date maupun jumlah hari kalender.
+  return normalizeWorkdayMtdValue(snap.workdayMtd);
+}
+function formatTatTodayPercent(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '-';
+  return fmtPercent(numeric, Number.isInteger(numeric) ? 0 : 2);
+}
+function tatTodayLabelText(snapshot) {
+  const snap = snapshot || State.activeSnapshot;
+  if (!snap) return '';
+  const tat = isValidTatMtdValue(snap.tatMtd) ? Number(snap.tatMtd) : null;
+  if (tat === null) return '';
+  const workday = activeSnapshotWorkdayMtd(snap);
+  return `TAT Hari Ini: ${formatTatTodayPercent(tat)} / ${workday === null ? '-' : fmtNumber(workday, 0)} HK`;
+}
+function tatTodayInfoHtml() {
+  const text = tatTodayLabelText();
+  if (!text) return '';
+  return `<div class="dt-ranking-tat-info" title="Pace perusahaan pada snapshot aktif. Kolom %TAT tetap dihitung per entitas.">${escapeHtml(text)}</div>`;
+}
 function rankingCompactMoneyHtml(value) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return '-';
   return `<span title="${escapeHtml(fmtRupiah(Number(value)))}">${escapeHtml(fmtRupiahCompact(Number(value)))}</span>`;
 }
-function rankingTatColumn(key, groupKey, groupLabel, groupClass, width = 80) {
+/**
+ * %TAT PER ENTITAS (bukan TAT global perusahaan).
+ *   %TAT KPI = %Achievement KPI ÷ TAT Hari Ini × 100%
+ * Sumbernya adalah kpi[kpiId].scoreBasis yang sudah dihitung oleh kpiScoreBasis() — TIDAK dibuat
+ * formula paralel kedua. Nilai yang ditampilkan adalah scoreBasis (SEBELUM score cap), sehingga
+ * score cap tidak pernah mengubah angka pada kolom %TAT.
+ * Bila TAT MTD snapshot tidak valid (snapshot legacy) kolom ini tampil '-'.
+ */
+function rankingTatAchievement(row, kpiId) {
+  if (!row || !row.kpi || !row.kpi[kpiId]) return null;
+  if (!isTatAdjustedKpi(kpiId)) return null;
+  if (!isValidTatMtdValue(rankingTatMtd(row))) return null;
+  const value = Number(row.kpi[kpiId].scoreBasis);
+  return Number.isFinite(value) ? value : null;
+}
+function rankingTatColumn(key, kpiId, groupKey, groupLabel, groupClass, width = 80) {
   return { key, label: '%TAT', groupKey, groupLabel, groupClass, align: 'center', sortable: false, width,
-    render: row => fmtPercent(rankingTatMtd(row)), csvValue: row => rankingTatMtd(row), jpgValue: row => fmtPercent(rankingTatMtd(row)) };
+    render: row => fmtPercent(rankingTatAchievement(row, kpiId)),
+    csvValue: row => rankingTatAchievement(row, kpiId),
+    jpgValue: row => fmtPercent(rankingTatAchievement(row, kpiId)) };
 }
 function rankingPercentColumn(key, label, groupKey, groupLabel, groupClass, kpiId, options = {}) {
   return {
@@ -5294,9 +5406,15 @@ function kpiHeaderFilterDefs() {
     { key: 'support.tgtEpb2', type: 'number-range', label: 'Target EPB Strata 2', placeholderMin: 'Minimum', placeholderMax: 'Maksimum', valueFn: rankingEpbTarget },
     { key: 'support.epb2', type: 'number-range', label: 'EPB Strata 2', placeholderMin: 'Minimum', placeholderMax: 'Maksimum', valueFn: rankingEpbActual },
     { key: 'kpi.strata2.actual', type: 'kpi-combined', kpiId: 'strata2', label: 'EPB Strata 2', placeholderMin: 'Minimum %', placeholderMax: 'Maksimum %' }
-  ];
+  ].filter(def => isRankingAdminView() || !ADMIN_ONLY_HEADER_FILTER_KEYS.has(def.key));
 }
-const KPI_HEADER_FILTER_LABELS = Object.fromEntries(kpiHeaderFilterDefs().map(def => [def.key, def.label]));
+const KPI_HEADER_FILTER_LABELS = {
+  'kpi.scJks.actual': 'SC/JKS', 'kpi.geofencing.actual': 'Geofencing', 'support.avgEc': 'AVG EC',
+  'kpi.roaCb.actual': 'ROA', 'kpi.hitRate.actual': 'EC vs Call Total',
+  'revenueNominal.target': 'Target Omzet', 'revenueNominal.actual': 'Omzet',
+  'kpi.revenue.actual': 'Total Omset', 'support.tgtEpb2': 'Target EPB Strata 2',
+  'support.epb2': 'EPB Strata 2', 'kpi.strata2.actual': 'EPB Strata 2'
+};
 // H: reset HANYA filter Strata KPI tertentu (tidak menyentuh filter identitas/KPI lain/search/Countif/sorting/status/Phase)
 // di seluruh menu ranking, dipanggil saat batas Strata KPI tersebut diubah & disimpan di Detail KPI.
 function resetKpiStrataFiltersAcrossRankings(kpiId) {
@@ -5332,6 +5450,31 @@ function headerFilterSummaryChips(table, identityLabels = {}) {
     }
   });
   return chips;
+}
+/* ------------------------------------------------------------
+   VIEWER / ADMIN COLUMN VISIBILITY (Ranking)
+   Viewer hanya melihat kolom persentase untuk pasangan target/aktual ROA, OMZ, dan EPB2.
+   Daftar kolom dibangun berdasarkan runtime mode (bukan sekadar CSS display:none) agar header,
+   body, colspan grouped header, sticky position, colgroup, lebar tabel, CSV, dan JPG konsisten.
+   CATATAN: Viewer column restriction is UI-level; database payload security requires separate
+   Supabase contract/RLS work. Payload raw pada snapshot TIDAK diubah agar tetap kompatibel.
+   ------------------------------------------------------------ */
+const ADMIN_ONLY_RANKING_COLUMN_KEYS = new Set([
+  'support.tgtRoa',        // TGT ROA
+  'support.roa',           // ROA
+  'revenueNominal.target', // TGT OMZ
+  'revenueNominal.actual', // OMZET
+  'support.tgtEpb2',       // TGT EPB2
+  'support.epb2'           // EPB2
+]);
+// Countif / sorting indicator yang merepresentasikan kolom Admin-only.
+const ADMIN_ONLY_COUNTIF_INDICATOR_IDS = new Set(['tgtOmz', 'omzet', 'tgtEpb2', 'epb2']);
+// Header filter yang secara langsung mengungkap nilai target/aktual nominal Admin-only.
+const ADMIN_ONLY_HEADER_FILTER_KEYS = new Set(['revenueNominal.target', 'revenueNominal.actual', 'support.tgtEpb2', 'support.epb2']);
+function isRankingAdminView() { return State.isAdmin === true && State.runtimeMode === 'admin'; }
+function filterRankingColumnsByMode(cols) {
+  if (isRankingAdminView()) return cols;
+  return cols.filter(c => !ADMIN_ONLY_RANKING_COLUMN_KEYS.has(c.key));
 }
 function rankingColumns(opts) {
   const showTotalSalesman = opts.showTotalSalesman !== false;
@@ -5402,7 +5545,7 @@ function rankingColumns(opts) {
     { key: 'support.roa', label: 'ROA', groupKey: 'productivity', groupLabel: 'Productivity', groupClass: 'dt-grp-productivity', align: 'center', sortable: false, width: 86,
       render: row => fmtNumber(rankingRoaActual(row), 0), csvValue: row => rankingRoaActual(row), jpgValue: row => fmtNumber(rankingRoaActual(row), 0) },
     rankingPercentColumn('kpi.roaCb.actual', '%ROA', 'productivity', 'Productivity', 'dt-grp-productivity', 'roaCb', { width: 86, sortId: 'roaCb' }),
-    rankingTatColumn('support.tatRoa', 'productivity', 'Productivity', 'dt-grp-productivity'),
+    rankingTatColumn('support.tatRoa', 'roaCb', 'productivity', 'Productivity', 'dt-grp-productivity'),
     rankingPercentColumn('kpi.hitRate.actual', 'EC VS CALL TOTAL', 'productivity', 'Productivity', 'dt-grp-productivity', 'hitRate', { width: 120, sortId: 'hitRate' }),
     {
       key: 'revenueNominal.target', label: 'TGT OMZ', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'tgtOmz', width: 104,
@@ -5417,7 +5560,7 @@ function rankingColumns(opts) {
       jpgValue: row => fmtRupiahCompact(rankingRevenueNominalActual(row))
     },
     rankingPercentColumn('kpi.revenue.actual', '% OMZ', 'revenue', 'Revenue Total', 'dt-grp-revenue', 'revenue', { width: 84, sortId: 'pctOmz' }),
-    rankingTatColumn('support.tatRevenue', 'revenue', 'Revenue Total', 'dt-grp-revenue'),
+    rankingTatColumn('support.tatRevenue', 'revenue', 'revenue', 'Revenue Total', 'dt-grp-revenue'),
     {
       key: 'support.tgtEpb2', label: 'TGT EPB2', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'tgtEpb2', width: 88,
       render: row => fmtNumber(rankingEpbTarget(row), 0), csvValue: row => rankingEpbTarget(row), jpgValue: row => fmtNumber(rankingEpbTarget(row), 0)
@@ -5427,13 +5570,13 @@ function rankingColumns(opts) {
       render: row => fmtNumber(rankingEpbActual(row), 0), csvValue: row => rankingEpbActual(row), jpgValue: row => fmtNumber(rankingEpbActual(row), 0)
     },
     rankingPercentColumn('kpi.strata2.actual', '% EPB2', 'revenue', 'Revenue Total', 'dt-grp-revenue', 'strata2', { width: 86, sortId: 'pctEpb2' }),
-    rankingTatColumn('support.tatEpb2', 'revenue', 'Revenue Total', 'dt-grp-revenue'),
+    rankingTatColumn('support.tatEpb2', 'strata2', 'revenue', 'Revenue Total', 'dt-grp-revenue'),
     { key: 'finalScore', label: 'Final Score', align: 'center', sortable: true, sortId: 'finalScore', headerBand: 'result', width: 104,
       render: r => `<strong>${fmtNumber(r.finalScore, 2)}</strong>`, csvValue: r => r.finalScore, jpgValue: r => fmtNumber(r.finalScore, 2) },
     { key: 'category.label', label: 'Kategori', align: 'center', sortable: false, headerBand: 'result', width: 128,
       render: r => categoryBadge(r.category), csvValue: r => r.category ? r.category.label : '' }
   );
-  return cols;
+  return filterRankingColumnsByMode(cols);
 }
 
 /* ============================================================
@@ -6026,6 +6169,32 @@ function wireRankingSalesmanPage(params) {
 /* ============================================================
    PAGE RENDERERS — DETAIL SALESMAN (SIDE DRAWER)
    ============================================================ */
+/* ------------------------------------------------------------
+   DETAIL SALESMAN — ANGKA DASAR PER MODE
+   Enam field nominal Admin-only (CB/TGT ROA, ROA, TGT OMZ, OMZET, TGT EPB2, EPB2) TIDAK dirender
+   ke DOM Detail Viewer maupun ke Detail JPG Viewer. Field-nya TIDAK dihapus dari record dan tetap
+   dipakai penuh oleh calculation engine — hanya penyajiannya yang dibatasi.
+   CATATAN: pembatasan ini UI/export-level; payload Supabase tidak diubah pada task ini.
+   ------------------------------------------------------------ */
+function salesmanDetailProductivityFacts(rec, separator) {
+  const parts = [];
+  if (isRankingAdminView()) parts.push(`CB/TGT ROA: ${fmtNumber(rec.cb)}`, `ROA: ${fmtNumber(rec.roa)}`);
+  parts.push(`TAT MTD: ${fmtPercent(rec.tatMtd)}`, `Total Call Esuite: ${fmtNumber(rec.totalCallEsuite, 2)}`,
+    `AVG EC: ${fmtNumber(rec.avgEc, 2)} (target ${fmtNumber(State.settings.avgEcTarget)})`);
+  return parts.join(separator);
+}
+function salesmanDetailRevenueFacts(rec, separator) {
+  const parts = [];
+  if (isRankingAdminView()) parts.push(`Target Omset: ${fmtRupiah(rec.tgtOmsFm)}`, `Total Omset: ${fmtRupiah(rec.mtdOmsFm)}`);
+  parts.push(`TAT MTD: ${fmtPercent(rec.tatMtd)}`);
+  return parts.join(separator);
+}
+function salesmanDetailStrata2Facts(rec, separator) {
+  const parts = [];
+  if (isRankingAdminView()) parts.push(`Target Strata 2: ${fmtNumber(rec.tgtEpbStrata2)}`, `Actual Strata 2: ${fmtNumber(rec.achEpbPoinRoa)}`);
+  parts.push(`Status: ${escapeHtml(rec.isAchieveSt2 || '-')}`);
+  return parts.join(separator);
+}
 function openSalesmanDetailDrawer(row) {
   const rec = row.rec, kpi = row.kpi, groups = row.groups;
   const bestKpi = Object.values(kpi).filter(k => k.scoreBasis !== null).sort((a, b) => b.scoreBasis - a.scoreBasis)[0];
@@ -6047,13 +6216,13 @@ function openSalesmanDetailDrawer(row) {
     <div class="detail-group"><h3>Productivity <span class="group-score">(${fmtNumber(groups.productivity.groupScore, 2)})</span></h3>
       <table class="detail-table"><thead><tr><th>KPI</th><th class="ta-right">Aktual</th><th class="ta-right">Score</th><th class="ta-right">Bobot</th><th class="ta-right">Kontribusi</th></tr></thead>
       <tbody>${kpiRow(kpi.roaCb)}${kpiRow(kpi.hitRate)}${kpiRow(kpi.avgEcAch)}</tbody></table>
-      <div class="detail-support-info">CB/TGT ROA: ${fmtNumber(rec.cb)} • ROA: ${fmtNumber(rec.roa)} • TAT MTD: ${fmtPercent(rec.tatMtd)} • Total Call/Day: ${fmtNumber(rec.totalCallDay, 2)} • AVG EC: ${fmtNumber(rec.avgEc, 2)} (target 25)</div>
+      <div class="detail-support-info">${salesmanDetailProductivityFacts(rec, ' • ')}</div>
     </div>
     <div class="detail-group"><h3>Revenue Total <span class="group-score">(${fmtNumber(groups.revenue.groupScore, 2)})</span></h3>
       <table class="detail-table"><thead><tr><th>KPI</th><th class="ta-right">Aktual</th><th class="ta-right">Score</th><th class="ta-right">Bobot</th><th class="ta-right">Kontribusi</th></tr></thead>
       <tbody>${kpiRow(kpi.revenue)}${kpiRow(kpi.strata2)}</tbody></table>
-      <div class="detail-support-info">Target Omset: ${fmtRupiah(rec.tgtOmsFm)} • Total Omset: ${fmtRupiah(rec.mtdOmsFm)} • TAT MTD: ${fmtPercent(rec.tatMtd)}<br/>
-        Target Strata 2: ${fmtNumber(rec.tgtEpbStrata2)} • Actual Strata 2: ${fmtNumber(rec.achEpbPoinRoa)} • Status: ${escapeHtml(rec.isAchieveSt2 || '-')}</div>
+      <div class="detail-support-info">${salesmanDetailRevenueFacts(rec, ' • ')}<br/>
+        ${salesmanDetailStrata2Facts(rec, ' • ')}</div>
     </div>
     <div class="detail-summary">
       <div><strong>KPI Terbaik:</strong> ${bestKpi ? `${escapeHtml(bestKpi.label)} (${fmtPercent(bestKpi.actual)})` : '-'}</div>
@@ -6116,8 +6285,8 @@ async function generateSalesmanDetailJpg(row) {
       <thead><tr><th class="ta-left">Kelompok</th><th class="ta-left">Angka Dasar</th></tr></thead>
       <tbody>
         <tr><td class="ta-left">Proses Kerja</td><td class="ta-left">TGT SC JKS: ${fmtNumber(rec.tgtScJks)} &nbsp;|&nbsp; ACH SC VS JKS: ${fmtNumber(rec.achScVsJks)} &nbsp;|&nbsp; Geofencing: ${fmtNumber(rec.geofencing)}</td></tr>
-        <tr><td class="ta-left">Productivity</td><td class="ta-left">CB: ${fmtNumber(rec.cb)} &nbsp;|&nbsp; ROA: ${fmtNumber(rec.roa)} &nbsp;|&nbsp; Total Call/Day: ${fmtNumber(rec.totalCallDay, 2)} &nbsp;|&nbsp; AVG EC: ${fmtNumber(rec.avgEc, 2)} &nbsp;|&nbsp; Target AVG EC: ${fmtNumber(State.settings.avgEcTarget)}</td></tr>
-        <tr><td class="ta-left">Revenue</td><td class="ta-left">Target Revenue: ${fmtRupiah(rec.tgtOmsFm)} &nbsp;|&nbsp; Revenue Aktual: ${fmtRupiah(rec.mtdOmsFm)} &nbsp;|&nbsp; Target Strata 2: ${fmtNumber(rec.tgtEpbStrata2)} &nbsp;|&nbsp; Actual Strata 2: ${fmtNumber(rec.achEpbPoinRoa)} &nbsp;|&nbsp; Status Strata 2: ${escapeHtml(rec.isAchieveSt2 || '-')}</td></tr>
+        <tr><td class="ta-left">Productivity</td><td class="ta-left">${salesmanDetailProductivityFacts(rec, ' &nbsp;|&nbsp; ')}</td></tr>
+        <tr><td class="ta-left">Revenue</td><td class="ta-left">${salesmanDetailRevenueFacts(rec, ' &nbsp;|&nbsp; ')} &nbsp;|&nbsp; ${salesmanDetailStrata2Facts(rec, ' &nbsp;|&nbsp; ')}</td></tr>
       </tbody>
     </table>
     <div class="jpg-export-kpi-summary">
@@ -6299,7 +6468,7 @@ async function generateDashboardRegionalJpg() {
    Bukan halaman ranking baru — tanpa rank/medal/highlight juara.
    HTML web, JPG, dan CSV memakai sumber data & kolom yang sama.
    ============================================================ */
-const REGIONAL_DEPO_PERF_GROUPS = [
+const REGIONAL_DEPO_PERF_GROUPS_ALL = [
   { key: 'identity', label: 'Identitas Depo', span: 3, cls: 'rdp-grp-identity', sticky: true, stickyLeft: 0, width: 430 },
   { key: 'process', label: 'Proses Kerja', span: 2, cls: 'rdp-grp-process' },
   { key: 'productivity', label: 'Productivity', span: 6, cls: 'rdp-grp-productivity' },
@@ -6310,7 +6479,7 @@ function rdpAvgEc(depoRow) {
   const v = safeDivide(depoRow.sums.avgEc, depoRow.eligibleSalesman);
   return v;
 }
-const REGIONAL_DEPO_PERF_COLUMNS = [
+const REGIONAL_DEPO_PERF_COLUMNS_ALL = [
   { key: 'namaDepo', group: 'identity', label: 'Nama Depo', sticky: true, stickyLeft: 0, width: 210,
     value: r => escapeHtml(r.meta.depo || '-'), csvValue: r => r.meta.depo || '' },
   { key: 'kodeDepo', group: 'identity', label: 'Kode Depo', sticky: true, stickyLeft: 210, width: 110,
@@ -6323,19 +6492,33 @@ const REGIONAL_DEPO_PERF_COLUMNS = [
   { key: 'tgtRoa', group: 'productivity', label: 'TGT ROA', width: 90, value: r => fmtNumber(r.sums.cb, 0), csvValue: r => r.sums.cb },
   { key: 'roa', group: 'productivity', label: 'ROA', width: 86, value: r => fmtNumber(r.sums.roa, 0), csvValue: r => r.sums.roa },
   { key: 'roaCb', group: 'productivity', label: '%ROA', width: 86, value: r => fmtPercent(r.kpi.roaCb.actual), csvValue: r => r.kpi.roaCb.actual },
-  { key: 'tatRoa', group: 'productivity', label: '%TAT', width: 80, value: r => fmtPercent(rankingTatMtd(r)), csvValue: r => rankingTatMtd(r) },
+  { key: 'tatRoa', group: 'productivity', label: '%TAT', width: 80, value: r => fmtPercent(rankingTatAchievement(r, 'roaCb')), csvValue: r => rankingTatAchievement(r, 'roaCb') },
   { key: 'hitRate', group: 'productivity', label: 'EC VS CALL TOTAL', width: 120, value: r => fmtPercent(r.kpi.hitRate.actual), csvValue: r => r.kpi.hitRate.actual },
   { key: 'targetOmzet', group: 'revenue', label: 'TGT OMZ', width: 104, value: r => rankingCompactMoneyHtml(r.revenueNominal.target), csvValue: r => r.revenueNominal.target },
   { key: 'omzetAktual', group: 'revenue', label: 'OMZET', width: 104, value: r => rankingCompactMoneyHtml(r.revenueNominal.actual), csvValue: r => r.revenueNominal.actual },
   { key: 'achOmzet', group: 'revenue', label: '% OMZ', width: 84, value: r => fmtPercent(r.kpi.revenue.actual), csvValue: r => r.kpi.revenue.actual },
-  { key: 'tatOmzet', group: 'revenue', label: '%TAT', width: 80, value: r => fmtPercent(rankingTatMtd(r)), csvValue: r => rankingTatMtd(r) },
+  { key: 'tatOmzet', group: 'revenue', label: '%TAT', width: 80, value: r => fmtPercent(rankingTatAchievement(r, 'revenue')), csvValue: r => rankingTatAchievement(r, 'revenue') },
   { key: 'targetEpb2', group: 'revenue', label: 'TGT EPB2', width: 88, value: r => fmtNumber(r.sums.tgtEpbStrata2, 0), csvValue: r => r.sums.tgtEpbStrata2 },
   { key: 'epb2', group: 'revenue', label: 'EPB2', width: 80, value: r => fmtNumber(r.sums.achEpbPoinRoa, 0), csvValue: r => r.sums.achEpbPoinRoa },
   { key: 'strata2', group: 'revenue', label: '% EPB2', width: 86, value: r => fmtPercent(r.kpi.strata2.actual), csvValue: r => r.kpi.strata2.actual },
-  { key: 'tatEpb2', group: 'revenue', label: '%TAT', width: 80, value: r => fmtPercent(rankingTatMtd(r)), csvValue: r => rankingTatMtd(r) },
+  { key: 'tatEpb2', group: 'revenue', label: '%TAT', width: 80, value: r => fmtPercent(rankingTatAchievement(r, 'strata2')), csvValue: r => rankingTatAchievement(r, 'strata2') },
   { key: 'finalScore', group: 'result', label: 'Final Score', width: 104, value: r => fmtNumber(r.finalScore, 2), csvValue: r => r.finalScore },
   { key: 'kategori', group: 'result', label: 'Kategori', width: 128, isCategory: true, value: r => categoryBadge(r.category), csvValue: r => r.category ? r.category.label : '' }
 ];
+
+// Kolom nominal target/aktual pada tabel Pencapaian Depo Regional yang hanya boleh dilihat Admin.
+const ADMIN_ONLY_RDP_COLUMN_KEYS = new Set(['tgtRoa', 'roa', 'targetOmzet', 'omzetAktual', 'targetEpb2', 'epb2']);
+function regionalDepoPerfColumns() {
+  if (isRankingAdminView()) return REGIONAL_DEPO_PERF_COLUMNS_ALL;
+  return REGIONAL_DEPO_PERF_COLUMNS_ALL.filter(c => !ADMIN_ONLY_RDP_COLUMN_KEYS.has(c.key));
+}
+// Span grouped header dihitung ulang dari kolom yang benar-benar tampil, sehingga colspan selalu benar
+// dan tidak ada header grup kosong pada mode Viewer.
+function regionalDepoPerfGroups(columns) {
+  return REGIONAL_DEPO_PERF_GROUPS_ALL
+    .map(g => ({ ...g, span: columns.filter(c => c.group === g.key).length }))
+    .filter(g => g.span > 0);
+}
 
 // Data Depo milik satu Regional — TIDAK memakai rankList(), TIDAK diberi property rank,
 // diurutkan A-Z berdasarkan nama Depo (bukan Final Score).
@@ -6372,21 +6555,22 @@ function buildRegionalDepoPerformanceTableHtml(depoRows, options = {}) {
   const mode = options.mode || 'web';
   const tableClass = mode === 'jpg' ? 'regional-depo-jpg-table' : 'regional-depo-performance-table';
 
-  const groupHeaderRow = REGIONAL_DEPO_PERF_GROUPS.map(g => {
+  const perfColumns = regionalDepoPerfColumns();
+  const groupHeaderRow = regionalDepoPerfGroups(perfColumns).map(g => {
     const isStickyGroup = mode === 'web' && g.sticky;
     const classes = [g.cls, isStickyGroup ? 'rdp-sticky-group' : ''].filter(Boolean).join(' ');
     const stickyStyle = isStickyGroup ? `left:${g.stickyLeft || 0}px;width:${g.width}px;min-width:${g.width}px;max-width:${g.width}px;` : '';
     return `<th colspan="${g.span}" class="${classes}" ${stickyStyle ? `style="${stickyStyle}"` : ''}>${escapeHtml(g.label)}</th>`;
   }).join('');
 
-  const columnHeaderRow = REGIONAL_DEPO_PERF_COLUMNS.map(c => {
+  const columnHeaderRow = perfColumns.map(c => {
     if (mode !== 'web' || !c.sticky) return `<th>${escapeHtml(c.label)}</th>`;
     const cls = `rdp-sticky-col${c.stickyEnd ? ' rdp-sticky-end' : ''}`;
     return `<th class="${cls}" style="left:${c.stickyLeft}px;width:${c.width}px;min-width:${c.width}px;max-width:${c.width}px;">${escapeHtml(c.label)}</th>`;
   }).join('');
 
   const bodyRows = depoRows.map(row => {
-    const cells = REGIONAL_DEPO_PERF_COLUMNS.map(c => {
+    const cells = perfColumns.map(c => {
       let val = c.value(row);
       if (val === null || val === undefined || val === '' || val === 'NaN' || val === 'Infinity') val = '-';
       if (mode !== 'web' || !c.sticky) return `<td>${val}</td>`;
@@ -6397,7 +6581,7 @@ function buildRegionalDepoPerformanceTableHtml(depoRows, options = {}) {
   }).join('');
 
   // Colgroup menjaga garis kolom header & body tetap sejajar, dipakai di web maupun JPG.
-  const colgroupHtml = `<colgroup>${REGIONAL_DEPO_PERF_COLUMNS.map(c => {
+  const colgroupHtml = `<colgroup>${perfColumns.map(c => {
     const width = c.width || 105;
     return `<col style="width:${width}px;">`;
   }).join('')}</colgroup>`;
@@ -6408,7 +6592,7 @@ function buildRegionalDepoPerformanceTableHtml(depoRows, options = {}) {
       <tr class="regional-depo-group-header">${groupHeaderRow}</tr>
       <tr class="regional-depo-column-header">${columnHeaderRow}</tr>
     </thead>
-    <tbody>${bodyRows || `<tr><td colspan="${REGIONAL_DEPO_PERF_COLUMNS.length}" class="dt-empty">Belum ada data Depo untuk Regional ini.</td></tr>`}</tbody>
+    <tbody>${bodyRows || `<tr><td colspan="${perfColumns.length}" class="dt-empty">Belum ada data Depo untuk Regional ini.</td></tr>`}</tbody>
   </table>`;
 
   return mode === 'web' ? `<div class="regional-depo-performance-wrap">${tableHtml}</div>` : tableHtml;
@@ -6661,8 +6845,9 @@ async function generateRegionalDepoPerformanceJpg(regionRow, depoRows) {
 }
 
 function exportRegionalDepoPerformanceCsv(regionRow, depoRows) {
-  const headers = REGIONAL_DEPO_PERF_COLUMNS.map(c => c.label);
-  const rows = depoRows.map(depoRow => REGIONAL_DEPO_PERF_COLUMNS.map(c => c.csvValue(depoRow)));
+  const perfColumns = regionalDepoPerfColumns();
+  const headers = perfColumns.map(c => c.label);
+  const rows = depoRows.map(depoRow => perfColumns.map(c => c.csvValue(depoRow)));
   exportToCsv(`Pencapaian_Depo_${sanitizeFilenamePart(regionRow.meta.region)}.csv`, headers, rows, [...statusSalesmanCsvMetadataRows(), ['Regional', regionRow.meta.region]]);
   showToast('Export CSV berhasil.', 'success');
 }
@@ -8029,9 +8214,13 @@ function renderUploadPreview() {
         <div class="v-item ${up.parsed.skippedTemplateRows > 0 ? 'info' : ''}">Baris template/duplikat header dilewati: ${up.parsed.skippedTemplateRows}</div>
         <div class="v-item ${up.dupInfo.duplicateCodes.length ? 'warn' : 'ok'}">Duplikasi Kode Salesman terdeteksi: ${up.dupInfo.duplicateCodes.length}</div>
         <div class="v-item ${validation.totalNotEligible ? 'warn' : 'ok'}">Data tidak lengkap / nilai tidak valid / pembagi nol: ${validation.totalNotEligible}</div>
-        <div class="v-item ${(!up.parsed.notFound.includes('totalCallDay') || up.parsed.rawRecords.some(r => Number.isFinite(r.totalCallDay))) ? 'ok' : 'warn'}">
-          Struktur EC vs Call Total: <strong>TOTAL CALL/DAY</strong>
-          <div class="v-detail">Sumber: header TOTAL CALL/DAY (fallback S/index 18) • Formula: AVG EC ÷ TOTAL CALL/DAY × 100%</div>
+        <div class="v-item ${(!up.parsed.notFound.includes('totalCallEsuite') || up.parsed.rawRecords.some(r => Number.isFinite(r.totalCallEsuite))) ? 'ok' : 'warn'}">
+          Struktur EC vs Call Total: <strong>TOTAL CALL ESUITE</strong>
+          <div class="v-detail">Sumber: header TOTAL CALL ESUITE (fallback W/index 22) • Formula: AVG EC ÷ TOTAL CALL ESUITE × 100%</div>
+        </div>
+        <div class="v-item ${isValidWorkdayMtdValue(up.parsed.workdayMtd) ? 'ok' : 'warn'}">
+          Hari Kerja (HK) MTD: <strong>${isValidWorkdayMtdValue(up.parsed.workdayMtd) ? `${fmtNumber(up.parsed.workdayMtd, 0)} HK` : 'Tidak valid'}</strong>
+          <div class="v-detail">Sumber: sheet ${escapeHtml(up.parsed.sheetName)} cell ${WORKDAY_MTD_CELL} • ${isValidWorkdayMtdValue(up.parsed.workdayMtd) ? 'Nilai terbaca sebagai bilangan bulat 1–31.' : 'Nilai G2 kosong/bukan bilangan bulat 1–31. HK disimpan kosong dan ditampilkan "- HK" (tidak dikarang).'}</div>
         </div>
         <div class="v-item ${tatValidation.valid ? 'ok' : 'warn'}">
           TAT MTD: <strong>${tatValidation.valid ? fmtPercent(tatValidation.tatMtd) : 'Tidak valid'}</strong>
@@ -8079,17 +8268,20 @@ async function confirmSaveSnapshot() {
       id, cutoffDate, fileName: up.file.name, sheetName: up.parsed.sheetName, note, uploadedAt: Date.now(), isActive: true, revisionNumber,
       dataSchemaVersion: APP_CONFIG.CURRENT_DATA_SCHEMA_VERSION,
       hitRateSourceKey: APP_CONFIG.CURRENT_HIT_RATE_SOURCE,
-      hitRateSourceHeader: 'TOTAL CALL/DAY',
+      hitRateSourceHeader: 'TOTAL CALL ESUITE',
       hitRateFormulaVersion: APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION,
       tatMtd: up.tatValidation.tatMtd,
       tatSourceKey: APP_CONFIG.CURRENT_TAT_SOURCE,
       tatFormulaVersion: APP_CONFIG.CURRENT_TAT_FORMULA_VERSION,
+      // HK MTD dari Detail persalesman!G2. null bila G2 tidak valid (UI menampilkan "- HK").
+      workdayMtd: normalizeWorkdayMtdValue(up.parsed.workdayMtd),
+      workdaySourceCell: WORKDAY_MTD_CELL,
       rawRecords: up.resolvedRecords, totalRead: up.validation.totalRead, totalEligible: up.validation.totalEligible, totalNotEligible: up.validation.totalNotEligible
     };
     showLoadingOverlay('Menyimpan dan mengaktifkan data terbaru...');
     try {
-      const hasTotalCallDayField = !up.parsed.notFound.includes('totalCallDay') || up.parsed.rawRecords.some(record => Number.isFinite(record.totalCallDay));
-      if (!hasTotalCallDayField) throw new Error('Kolom TOTAL CALL/DAY tidak ditemukan pada file yang dipilih.');
+      const hasTotalCallEsuiteField = !up.parsed.notFound.includes('totalCallEsuite') || up.parsed.rawRecords.some(record => Number.isFinite(record.totalCallEsuite));
+      if (!hasTotalCallEsuiteField) throw new Error('Kolom TOTAL CALL ESUITE tidak ditemukan pada file yang dipilih.');
 
       await Storage.saveAndActivateSnapshot(snapshot);
       const activeAfterSave = await Storage.getActiveSnapshot();
@@ -8174,7 +8366,7 @@ function renderRiwayatTable() {
       { key: 'totalEligible', label: 'Data Valid', align: 'right', sortable: true, render: r => fmtNumber(r.totalEligible) },
       { key: 'totalNotEligible', label: 'Data Bermasalah', align: 'right', sortable: true, render: r => fmtNumber(r.totalNotEligible) },
       { key: 'revisionNumber', label: 'Revisi', align: 'right', sortable: true, render: r => r.revisionNumber || 1 },
-      { key: 'dataSchemaVersion', label: 'Struktur EC vs Call', sortable: true, render: r => isLegacyHitRateSnapshot(r) ? '<span class="badge cat-critical">Formula Lama</span>' : '<span class="badge cat-perfect">Total Call/Day</span>' },
+      { key: 'dataSchemaVersion', label: 'Struktur EC vs Call', sortable: true, render: r => isLegacyHitRateSnapshot(r) ? '<span class="badge cat-critical">Formula Lama</span>' : '<span class="badge cat-perfect">Total Call Esuite</span>' },
       { key: 'tatFormulaVersion', label: 'Formula TAT', sortable: true, render: r => isLegacyTatSnapshot(r) ? '<span class="badge cat-needimprove">Legacy</span>' : `<span class="badge cat-perfect">${fmtPercent(r.tatMtd)}</span>` },
       { key: 'isActive', label: 'Status', sortable: true, render: r => r.isActive ? '<span class="badge cat-perfect">Sedang Digunakan</span>' : '<span class="badge badge-muted">Tersimpan</span>' },
       { key: 'aksi', label: 'Aksi', sortable: false, excludeFromJpg: true, render: r => `<div class="row-actions">
@@ -8199,7 +8391,7 @@ function renderRiwayatTable() {
       await loadSnapshotIntoState(active);
       hideLoadingOverlay();
       renderSidebar();
-      showToast(isLegacyHitRateSnapshot(active) ? 'Snapshot formula lama diaktifkan. Upload ulang data untuk EC vs Call Total berbasis TOTAL CALL/DAY.' : 'Data berhasil digunakan.', isLegacyHitRateSnapshot(active) ? 'info' : 'success');
+      showToast(isLegacyHitRateSnapshot(active) ? 'Snapshot formula lama diaktifkan. Upload ulang data untuk EC vs Call Total berbasis TOTAL CALL ESUITE.' : 'Data berhasil digunakan.', isLegacyHitRateSnapshot(active) ? 'info' : 'success');
       navigate(isLegacyHitRateSnapshot(active) ? '/upload' : '/dashboard');
     } else if (e.target.classList.contains('act-view')) {
       const snap = await Storage.getSnapshot(id);
@@ -8446,12 +8638,12 @@ function phaseSummaryChip() {
   return State.activePhaseFilter ? [`Phase: ${State.activePhaseFilter}`] : [];
 }
 
-// Snapshot Hit Rate lama dibedakan dari formula aktif TOTAL CALL/DAY.
+// Snapshot Hit Rate lama dibedakan dari formula aktif TOTAL CALL ESUITE.
 // Snapshot baru wajib membawa metadata formula. Snapshot lama sebelum era metadata tetap dapat digunakan
-// hanya bila memiliki TOTAL CALL/DAY dan tidak menyatakan sumber/formula lain secara eksplisit.
-function snapshotHasTotalCallDay(snapshot) {
+// hanya bila memiliki TOTAL CALL ESUITE dan tidak menyatakan sumber/formula lain secara eksplisit.
+function snapshotHasTotalCallEsuite(snapshot) {
   const records = Array.isArray(snapshot && snapshot.rawRecords) ? snapshot.rawRecords : [];
-  return records.some(record => record && Object.prototype.hasOwnProperty.call(record, 'totalCallDay'));
+  return records.some(record => record && Object.prototype.hasOwnProperty.call(record, 'totalCallEsuite'));
 }
 function isLegacyHitRateSnapshot(snapshot) {
   if (!snapshot) return false;
@@ -8462,7 +8654,7 @@ function isLegacyHitRateSnapshot(snapshot) {
   const formulaIsCurrent = formulaVersion === APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION;
   if (sourceIsCurrent && formulaIsCurrent) return false;
   if (hasExplicitFormulaMetadata) return true;
-  return !snapshotHasTotalCallDay(snapshot);
+  return !snapshotHasTotalCallEsuite(snapshot);
 }
 async function loadSnapshotIntoState(snapshot) {
   State.vacantSelection.clear();
