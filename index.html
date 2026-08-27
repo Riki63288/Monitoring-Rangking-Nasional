@@ -109,10 +109,25 @@ body{margin:0;font-family:var(--font);background:var(--bg);color:var(--ink);min-
 .topbar-phase-chip{display:flex;align-items:center;gap:6px;background:#fdf3d8;color:#946f00;border:1px solid #ecdca4;border-radius:20px;padding:4px 10px;font-size:11.5px;font-weight:700;white-space:nowrap;}
 .topbar-phase-chip button{background:none;border:none;color:#946f00;cursor:pointer;font-size:12px;padding:0;line-height:1;}
 .topbar-status-btn{white-space:nowrap;}
+.topbar-global-filter-btn{white-space:nowrap;max-width:230px;overflow:hidden;text-overflow:ellipsis;}
+.topbar-global-multi-popover .topbar-global-multi-options{max-height:280px;overflow-y:auto;}
+.topbar-global-multi-popover .status-opt-count{margin-left:auto;font-size:11px;font-weight:800;color:var(--ink-soft);}
+.topbar-global-multi-popover .dt-filter-option{justify-content:space-between;}
+.dk-global-filter-label{display:flex;align-items:center;gap:6px;}
+.modal-publish-scope .publish-scope-section{border:1px solid var(--card-border);border-radius:10px;padding:10px 12px;margin:4px 0 14px;background:#fff;}
+.modal-publish-scope .publish-scope-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px;}
+.modal-publish-scope .publish-scope-head h3{margin:0;font-size:13px;color:var(--navy);}
+.modal-publish-scope .publish-scope-all{margin:0;}
+.modal-publish-scope .publish-scope-list{max-height:min(38vh,260px);overflow-y:auto;border-top:1px solid var(--card-border);padding-top:6px;}
+.modal-publish-scope .publish-scope-list .dt-filter-option{justify-content:space-between;}
+.modal-publish-scope .publish-scope-list .status-opt-count{margin-left:auto;font-size:11px;font-weight:800;color:var(--ink-soft);}
+.modal-publish-scope .publish-preview-title{margin:0 0 6px;font-size:13px;color:var(--navy);}
+.modal-publish-scope .publish-preview-empty{color:#b33327;font-weight:700;}
+@media (max-width:700px){.modal-publish-scope .publish-scope-list{max-height:30vh;}}
 .topbar-status-popover .status-opt-count{margin-left:auto;font-size:11px;font-weight:800;color:var(--ink-soft);}
 .topbar-status-popover .dt-filter-option{justify-content:space-between;}
 .topbar-vacant-warning{flex-basis:100%;order:99;background:#fdeceb;color:#b33327;border:1px solid #f3c8c4;border-radius:8px;padding:6px 12px;font-size:11.5px;font-weight:800;margin-top:8px;}
-@media (max-width:900px){.topbar-phase-filter{order:3;width:100%;}}
+@media (max-width:900px){.topbar-phase-filter{order:3;}.topbar-global-filter-btn{max-width:100%;}}
 .topbar-status .dot{width:7px;height:7px;border-radius:50%;background:var(--green);}
 
 .topbar-data-summary{
@@ -1240,16 +1255,26 @@ const APP_CONFIG = {
 
   GROUP_LABELS: { proseskerja: 'Proses Kerja', productivity: 'Productivity', revenue: 'Revenue Total' },
 
+  // SATU-SATUNYA sumber kebenaran kategori Final Score. Urutan menurun; getFinalScoreCategory()
+  // mengambil entri pertama yang memenuhi score >= min.
   FINAL_SCORE_CATEGORIES: [
     { min: 95, label: 'Excellent', cls: 'cat-excellent' },
-    { min: 85, label: 'Very Good', cls: 'cat-verygood' },
-    { min: 75, label: 'Good', cls: 'cat-good' },
-    { min: 70, label: 'Need Improvement', cls: 'cat-needimprove' },
+    { min: 90, label: 'Very Good', cls: 'cat-verygood' },
+    { min: 85, label: 'Good', cls: 'cat-good' },
+    { min: 80, label: 'Need Improvement', cls: 'cat-needimprove' },
     { min: -Infinity, label: 'Critical', cls: 'cat-critical' }
   ]
 };
 function getDefaultWeights() { const w = {}; APP_CONFIG.KPI_DEFS.forEach(k => { w[k.id] = k.defaultWeight; }); return w; }
 function getFinalScoreCategory(score) { return APP_CONFIG.FINAL_SCORE_CATEGORIES.find(c => score >= c.min); }
+// Ambang quick filter Ranking DITURUNKAN dari FINAL_SCORE_CATEGORIES (bukan angka hardcode terpisah),
+// sehingga mengubah kategori otomatis mengubah Critical / Need Improvement / Good+.
+function finalScoreCategoryMin(label) {
+  const entry = APP_CONFIG.FINAL_SCORE_CATEGORIES.find(c => c.label === label);
+  return entry ? entry.min : null;
+}
+function finalScoreNeedImprovementMin() { const v = finalScoreCategoryMin('Need Improvement'); return Number.isFinite(v) ? v : 0; }
+function finalScoreGoodPlusMin() { const v = finalScoreCategoryMin('Good'); return Number.isFinite(v) ? v : 0; }
 
 /* ============================================================
    GLOBAL STATE
@@ -1270,7 +1295,10 @@ const State = {
   snapshotList: [],
   uploadPreview: null,
   dashboardAnimated: false,
-  activePhaseFilter: null,
+  // GLOBAL FILTER (scope analisis, BUKAN business data yang dipublish).
+  // Set kosong === "Semua" (tidak ada pembatasan pada dimensi tersebut).
+  activePhaseFilters: new Set(),
+  activeRegionFilters: new Set(),
   isLegacyHitRateSnapshot: false,
   isLegacyTatSnapshot: false,
   comparison: { previousSnapshot: null, previousHierarchy: null },
@@ -1312,10 +1340,16 @@ function escapeHtml(s) {
   if (s === null || s === undefined) return '';
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+// Fingerprint Global Filter: nilai di-SORT agar deterministik (Set iteration order tidak dipakai apa adanya).
+function globalScopeFingerprint() {
+  const phasePart = Array.from(State.activePhaseFilters || []).map(String).sort().join('|');
+  const regionPart = Array.from(State.activeRegionFilters || []).map(String).sort().join('|');
+  return `ph:${phasePart}~rg:${regionPart}`;
+}
 function settingsFingerprint(settings) {
   const snapshot = State.activeSnapshot;
   const tatPart = snapshot ? `${snapshot.tatMtd ?? ''}|${snapshot.tatFormulaVersion || ''}` : '';
-  return JSON.stringify(settings.weights) + '|' + settings.scoreCap + '|' + settings.avgEcTarget + '|tat:' + tatPart;
+  return JSON.stringify(settings.weights) + '|' + settings.scoreCap + '|' + settings.avgEcTarget + '|tat:' + tatPart + '|' + globalScopeFingerprint();
 }
 // O: fingerprint KHUSUS untuk cache hierarchy (Detail KPI scoped & Ranking Phase). Mencakup seluruh input yang
 // benar-benar memengaruhi hasil agregasi: settings KPI, Status Salesman aktif, Phase, Master Cabang, VACANT,
@@ -1325,7 +1359,7 @@ function hierarchyCacheFingerprint() {
   const snap = State.activeSnapshot;
   const snapPart = snap ? `${snap.id}|${snap.revisionNumber || 1}` : 'none';
   const statusPart = Array.from(getActiveStatusSalesmanFilter()).sort().join(',');
-  return `${snapPart}|${State.activePhaseFilter || ''}|${statusPart}|${settingsFingerprint(State.settings)}|m${State.masterCabangVersion}|v${State.vacantVersion}`;
+  return `${snapPart}|${globalScopeFingerprint()}|${statusPart}|${settingsFingerprint(State.settings)}|m${State.masterCabangVersion}|v${State.vacantVersion}`;
 }
 // Simpan ke Map cache dengan batas ukuran (FIFO - entry terlama dihapus lebih dulu, lihat J3/K1).
 function cachePutBounded(cacheMap, key, value, maxSize = 20) {
@@ -1447,15 +1481,47 @@ function makeVacantEntry(rec) {
     cutoffDate: State.activeSnapshot ? State.activeSnapshot.cutoffDate : null
   };
 }
-function getRawRecordsForActivePhase(snapshot = State.activeSnapshot) {
-  if (!snapshot) return [];
-  const records = Array.isArray(snapshot.rawRecords) ? snapshot.rawRecords : [];
-  if (!State.activePhaseFilter) return records;
-  return records.filter(record => String(record.phaseProject || '').trim() === State.activePhaseFilter);
+/* ------------------------------------------------------------
+   GLOBAL SCOPE — SATU SUMBER KEBENARAN
+   Urutan universe perhitungan:
+     RAW SNAPSHOT -> GLOBAL PHASE -> GLOBAL REGIONAL -> STATUS SALESMAN
+       -> VALIDATION -> AGGREGATION -> FINAL SCORE -> RANKING -> QUICK/HEADER FILTER
+   Dalam satu dimensi memakai OR (nilai IN daftar terpilih); antar dimensi memakai AND.
+   Set kosong berarti "Semua" pada dimensi tersebut.
+   CATATAN PENTING: helper ini TIDAK PERNAH memutasi snapshot.rawRecords — hanya menghasilkan
+   derived records. Publish tetap memakai canonical snapshot penuh (lihat buildPublishedPayload).
+   ------------------------------------------------------------ */
+function phaseValueOfRecord(record) { return String((record && record.phaseProject) || '').trim(); }
+function regionValueOfRecord(record) { return String((record && record.region) || '').trim(); }
+function recordMatchesGlobalScope(record, phaseSet, regionSet) {
+  if (phaseSet && phaseSet.size && !phaseSet.has(phaseValueOfRecord(record))) return false;
+  if (regionSet && regionSet.size && !regionSet.has(regionValueOfRecord(record))) return false;
+  return true;
 }
+function applyGlobalScope(records, phaseSet, regionSet) {
+  const phases = phaseSet || State.activePhaseFilters;
+  const regions = regionSet || State.activeRegionFilters;
+  const list = Array.isArray(records) ? records : [];
+  if ((!phases || !phases.size) && (!regions || !regions.size)) return list;
+  return list.filter(record => recordMatchesGlobalScope(record, phases, regions));
+}
+// Raw records snapshot setelah Global Phase + Global Regional (BELUM difilter Status Salesman).
+function getGlobalScopedRawRecords(snapshot = State.activeSnapshot) {
+  if (!snapshot) return [];
+  return applyGlobalScope(Array.isArray(snapshot.rawRecords) ? snapshot.rawRecords : []);
+}
+// Alias historis — seluruh pemanggil lama otomatis ikut Global Scope (Phase + Regional).
+function getRawRecordsForActivePhase(snapshot = State.activeSnapshot) { return getGlobalScopedRawRecords(snapshot); }
+// Universe final untuk kalkulasi: Global Scope + Status Salesman.
 function getCalculationRecords(snapshot = State.activeSnapshot) {
   const activeStatuses = getActiveStatusSalesmanFilter();
-  return getRawRecordsForActivePhase(snapshot).filter(rec => activeStatuses.has(getEffectiveSalesmanStatus(rec)));
+  return getGlobalScopedRawRecords(snapshot).filter(rec => activeStatuses.has(getEffectiveSalesmanStatus(rec)));
+}
+// Cache yang bergantung pada Global Scope wajib dibuang saat filter berubah.
+function invalidateGlobalScopeCaches() {
+  State.rankingCache.clear();
+  State.detailKpiHierarchyCache.clear();
+  State.phaseHierarchyCache.clear();
 }
 function recomputeAfterVacantChange() {
   if (!State.activeSnapshot) return;
@@ -2500,11 +2566,14 @@ function selectPreviousComparisonSnapshot(activeSnapshot) {
   });
   return candidates[0] || null;
 }
-function recordsForSnapshotPhase(snapshot, phase) {
+// Snapshot pembanding WAJIB memakai Global Scope yang SAMA dengan snapshot aktif (Phase + Regional + Status),
+// sehingga delta tidak pernah membandingkan "current scoped" vs "previous nasional".
+// Bila nilai Phase/Regional terpilih tidak ada pada snapshot lama, hasilnya hanya lebih sedikit entitas —
+// entitas yang tidak punya pembanding diperlakukan sebagai "Baru" oleh decorateRankingComparison existing.
+function recordsForSnapshotScope(snapshot) {
   const records = Array.isArray(snapshot && snapshot.rawRecords) ? snapshot.rawRecords : [];
-  const scoped = !phase ? records : records.filter(record => String(record.phaseProject || '').trim() === String(phase));
-  const activeStatuses = getActiveStatusSalesmanFilter(); // current + previous snapshot HARUS sebanding (Phase & Status sama)
-  return scoped.filter(record => activeStatuses.has(getEffectiveSalesmanStatus(record))); // VACANT manual aktif (browser saat ini) ikut dipertimbangkan via getEffectiveSalesmanStatus
+  const activeStatuses = getActiveStatusSalesmanFilter();
+  return applyGlobalScope(records).filter(record => activeStatuses.has(getEffectiveSalesmanStatus(record))); // VACANT manual aktif (browser saat ini) ikut dipertimbangkan via getEffectiveSalesmanStatus
 }
 function rebuildComparisonContext() {
   const previousSnapshot = selectPreviousComparisonSnapshot(State.activeSnapshot);
@@ -2513,7 +2582,7 @@ function rebuildComparisonContext() {
     return;
   }
   try {
-    const validation = validateDataset(recordsForSnapshotPhase(previousSnapshot, State.activePhaseFilter));
+    const validation = validateDataset(recordsForSnapshotScope(previousSnapshot));
     const previousHierarchy = buildHierarchy(validation, State.settings);
     State.comparison = { previousSnapshot, previousHierarchy };
   } catch (error) {
@@ -2739,7 +2808,7 @@ function getRankingRowState(row, totalEntities, visualMode = 'standard') {
     isBottom3: isPhaseMode
       ? total > 1 && Number.isFinite(rank) && rank === total
       : total >= 6 && Number.isFinite(rank) && rank >= total - 2,
-    isCritical: categoryLabel === 'Critical' || (Number.isFinite(finalScore) && finalScore < 70),
+    isCritical: categoryLabel === 'Critical' || (Number.isFinite(finalScore) && finalScore < finalScoreNeedImprovementMin()),
     isTop1: rank === 1,
     isTop2: rank === 2,
     isTop3: rank === 3
@@ -3048,8 +3117,8 @@ class DataTable {
         const score = Number(row.finalScore);
         if (this.quickStatusFilter === 'bottom3') return state.isBottom3;
         if (this.quickStatusFilter === 'critical') return state.isCritical;
-        if (this.quickStatusFilter === 'need') return Number.isFinite(score) && score >= 70 && score < 75;
-        if (this.quickStatusFilter === 'goodplus') return Number.isFinite(score) && score >= 75;
+        if (this.quickStatusFilter === 'need') return Number.isFinite(score) && score >= finalScoreNeedImprovementMin() && score < finalScoreGoodPlusMin();
+        if (this.quickStatusFilter === 'goodplus') return Number.isFinite(score) && score >= finalScoreGoodPlusMin();
         return true;
       });
     }
@@ -4328,26 +4397,218 @@ function validatePublishedPayload(payload) {
     validateCanonicalSnapshot(payload.comparisonSnapshot, 'comparisonSnapshot');
     if (Object.prototype.hasOwnProperty.call(payload.comparisonSnapshot, 'comparisonSnapshot')) throw new Error('Snapshot pembanding tidak boleh bersarang.');
   }
+  // metadata.publishScope bersifat OPSIONAL & non-breaking (schemaVersion tetap 1): payload lama tanpa
+  // field ini tetap valid. Bila ada, isinya wajib konsisten dengan Regional yang benar-benar dipublish.
+  const publishScope = payload.metadata && payload.metadata.publishScope;
+  if (publishScope !== null && publishScope !== undefined) {
+    if (typeof publishScope !== 'object' || Array.isArray(publishScope)) throw new Error('Cakupan publikasi tidak valid.');
+    const included = publishScope.includedRegions;
+    if (!Array.isArray(included) || !included.length) throw new Error('Cakupan publikasi wajib memuat minimal satu Regional.');
+    const seen = new Set();
+    included.forEach(value => {
+      if (typeof value !== 'string' || !value.trim()) throw new Error('Cakupan publikasi memuat Regional yang tidak valid.');
+      const key = value.trim();
+      if (seen.has(key)) throw new Error('Cakupan publikasi memuat Regional duplikat.');
+      seen.add(key);
+    });
+    const outside = payload.activeSnapshot.rawRecords.find(record => !seen.has(String((record && record.region) || '').trim()));
+    if (outside) throw new Error('Cakupan publikasi tidak konsisten dengan data snapshot aktif.');
+    if (payload.comparisonSnapshot && Array.isArray(payload.comparisonSnapshot.rawRecords)) {
+      const outsideComparison = payload.comparisonSnapshot.rawRecords.find(record => !seen.has(String((record && record.region) || '').trim()));
+      if (outsideComparison) throw new Error('Cakupan publikasi tidak konsisten dengan snapshot pembanding.');
+    }
+  }
   return true;
 }
-async function buildPublishedPayload() {
-  if (!requireAdmin('memublikasikan data')) throw new Error('Akses admin diperlukan.');
-  if (!State.activeSnapshot || !State.validation) throw new Error('Snapshot lokal aktif dan hasil validasi wajib tersedia.');
-  let comparisonCandidate = null;
+/* ============================================================
+   PUBLISH SCOPE — BATAS DATA PUBLIKASI (BUKAN Global Filter topbar)
+   ------------------------------------------------------------
+   Global Phase/Regional di topbar = ANALYSIS SCOPE Admin/Viewer (UI saja).
+   PUBLISH SCOPE = Regional mana yang benar-benar DIKIRIM ke Supabase/Viewer.
+   Keduanya sengaja TIDAK saling membaca: selector Publish selalu bersumber dari
+   State.activeSnapshot.rawRecords PENUH, tidak pernah dari getCalculationRecords(),
+   getGlobalScopedRawRecords(), atau State.hierarchy.
+   Regional yang tidak dipilih beserta SELURUH turunannya (Salesman, ASS, Depo, Kode Depo,
+   Cabang, Master Cabang, VACANT, comparison) benar-benar dibuang dari payload SEBELUM
+   publishNationalSnapshot() dipanggil — bukan disembunyikan di UI Viewer.
+   Snapshot lokal Admin TIDAK PERNAH dimutasi: seluruh helper di bawah menghasilkan objek turunan.
+   ============================================================ */
+// Normalisasi HANYA untuk matching (nama Regional asli tetap dipakai untuk display).
+function normalizeRegionKey(value) { return String(value === null || value === undefined ? '' : value).trim(); }
+// Daftar Regional sumber = seluruh Regional pada snapshot lokal Admin PENUH.
+function getPublishScopeRegionOptions(snapshot = State.activeSnapshot) {
+  const records = Array.isArray(snapshot && snapshot.rawRecords) ? snapshot.rawRecords : [];
+  const counts = new Map();
+  records.forEach(record => {
+    const key = normalizeRegionKey(record && record.region);
+    if (!key) return;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  return Array.from(counts.keys())
+    .sort((a, b) => a.localeCompare(b, 'id', { numeric: true }))
+    .map(value => ({ value, label: value, count: counts.get(value) }));
+}
+function toRegionKeySet(regions) {
+  const set = new Set();
+  (regions instanceof Set ? Array.from(regions) : (Array.isArray(regions) ? regions : []))
+    .forEach(value => { const key = normalizeRegionKey(value); if (key) set.add(key); });
+  return set;
+}
+function recordInPublishScope(record, regionKeySet) {
+  return regionKeySet.has(normalizeRegionKey(record && record.region));
+}
+/**
+ * Salinan canonical snapshot yang rawRecords-nya sudah disaring menurut Publish Scope.
+ * Snapshot asal TIDAK diubah. Metadata penting (cutoffDate, revisionNumber, fileName, tatMtd,
+ * tatFormulaVersion, workdayMtd, schema/formula) dipertahankan apa adanya; hanya rawRecords
+ * yang disanitasi, dan total* dihitung ulang dari data publik.
+ */
+function createPublishScopedSnapshot(snapshot, regionKeySet) {
+  const canonical = canonicalSnapshot(snapshot);
+  if (!canonical) return null;
+  const publicRecords = canonical.rawRecords.filter(record => recordInPublishScope(record, regionKeySet));
+  const statuses = getActiveStatusSalesmanFilter();
+  const validation = validateDataset(publicRecords.filter(record => statuses.has(getEffectiveSalesmanStatus(record))));
+  return {
+    ...canonical,
+    rawRecords: publicRecords,
+    totalRead: publicRecords.length,
+    totalEligible: Number(validation.totalEligible || 0),
+    totalNotEligible: Number(validation.totalNotEligible || 0)
+  };
+}
+// Kode Depo yang benar-benar masih memiliki Salesman pada public snapshot.
+function publicDepoCodeSet(publicRecords) {
+  const set = new Set();
+  (publicRecords || []).forEach(record => {
+    const code = normalizeCabangCode(record && record.kodeDepo);
+    if (code) set.add(code);
+  });
+  return set;
+}
+/**
+ * Master Cabang publik = SUBSET dari data publik: Kode Depo-nya masih ada pada public records
+ * DAN (bila baris Master membawa Regional) Regional tersebut termasuk Publish Scope.
+ * Tidak ada Cabang/Depo orphan yang ikut terkirim.
+ */
+function sanitizeMasterCabangForPublish(publicRecords, regionKeySet) {
+  const allowedDepoCodes = publicDepoCodeSet(publicRecords);
+  const sourceRows = State.masterCabang && Array.isArray(State.masterCabang.rows) ? State.masterCabang.rows : [];
+  const rows = sourceRows.filter(row => {
+    const code = normalizeCabangCode(row && row.kodeDepo);
+    if (!code || !allowedDepoCodes.has(code)) return false;
+    const rowRegion = normalizeRegionKey(row && row.region);
+    if (rowRegion && !regionKeySet.has(rowRegion)) return false;
+    return true;
+  });
+  return {
+    rows,
+    uploadedAt: State.masterCabang ? State.masterCabang.uploadedAt || null : null,
+    fileName: State.masterCabang ? State.masterCabang.fileName || null : null
+  };
+}
+// Identitas VACANT (memakai helper identity existing) milik Salesman yang ada di public snapshot.
+function publicVacantIdentitySet(publicRecords) {
+  const set = new Set();
+  (publicRecords || []).forEach(record => { const key = buildVacantSalesmanKey(record); if (key) set.add(key); });
+  return set;
+}
+function sanitizeVacantEntriesForPublish(publicRecords, regionKeySet) {
+  const allowedIdentities = publicVacantIdentitySet(publicRecords);
+  const sourceEntries = Array.isArray(State.vacantEntries) ? State.vacantEntries : [];
+  return sourceEntries.filter(entry => {
+    if (!entry || !allowedIdentities.has(String(entry.id || ''))) return false;
+    const entryRegion = normalizeRegionKey(entry.region);
+    if (entryRegion && !regionKeySet.has(entryRegion)) return false;
+    return true;
+  });
+}
+/**
+ * FAIL-CLOSED. Memastikan payload benar-benar terisolasi pada Publish Scope.
+ * Jika satu saja pelanggaran ditemukan, publish DIBLOKIR (lebih baik gagal daripada bocor).
+ */
+function validatePublishScopeIsolation(payload, regionKeySet) {
+  if (!regionKeySet || !regionKeySet.size) throw new Error('Pilih minimal satu Regional untuk dipublikasikan.');
+  const active = payload && payload.activeSnapshot;
+  if (!active || !Array.isArray(active.rawRecords) || !active.rawRecords.length) {
+    throw new Error('Payload publikasi tidak lolos validasi cakupan Regional: tidak ada data pada Regional terpilih.');
+  }
+  // A. Seluruh record snapshot aktif harus berada di dalam scope.
+  const leakedActive = active.rawRecords.find(record => !recordInPublishScope(record, regionKeySet));
+  if (leakedActive) throw new Error('Payload publikasi tidak lolos validasi cakupan Regional (data snapshot aktif di luar cakupan).');
+  // B. Seluruh record snapshot pembanding harus berada di dalam scope.
+  const comparison = payload.comparisonSnapshot;
+  if (comparison && Array.isArray(comparison.rawRecords)) {
+    const leakedComparison = comparison.rawRecords.find(record => !recordInPublishScope(record, regionKeySet));
+    if (leakedComparison) throw new Error('Payload publikasi tidak lolos validasi cakupan Regional (data pembanding di luar cakupan).');
+  }
+  // C. Master Cabang hanya boleh menyangkut Depo yang ada di data publik.
+  const allowedDepoCodes = publicDepoCodeSet(active.rawRecords);
+  const comparisonDepoCodes = comparison && Array.isArray(comparison.rawRecords) ? publicDepoCodeSet(comparison.rawRecords) : new Set();
+  const rows = payload.masterCabang && Array.isArray(payload.masterCabang.rows) ? payload.masterCabang.rows : [];
+  const leakedMaster = rows.find(row => {
+    const code = normalizeCabangCode(row && row.kodeDepo);
+    if (!code) return true;
+    if (!allowedDepoCodes.has(code) && !comparisonDepoCodes.has(code)) return true;
+    const rowRegion = normalizeRegionKey(row && row.region);
+    return !!rowRegion && !regionKeySet.has(rowRegion);
+  });
+  if (leakedMaster) throw new Error('Payload publikasi tidak lolos validasi cakupan Regional (Master Cabang di luar cakupan).');
+  // D. VACANT hanya boleh menyangkut identitas Salesman yang ada di data publik.
+  const allowedIdentities = publicVacantIdentitySet(active.rawRecords);
+  const entries = Array.isArray(payload.vacantEntries) ? payload.vacantEntries : [];
+  const leakedVacant = entries.find(entry => {
+    if (!entry || !allowedIdentities.has(String(entry.id || ''))) return true;
+    const entryRegion = normalizeRegionKey(entry.region);
+    return !!entryRegion && !regionKeySet.has(entryRegion);
+  });
+  if (leakedVacant) throw new Error('Payload publikasi tidak lolos validasi cakupan Regional (data VACANT di luar cakupan).');
+  return true;
+}
+// Kandidat pembanding diambil SEKALI saat dialog dibuka (tidak diulang tiap perubahan checkbox).
+async function fetchPublishComparisonCandidate() {
   try {
     const currentRemote = await window.SupabaseService.getActivePublishedSnapshot();
     if (currentRemote && currentRemote.payload_json) {
       validatePublishedPayload(currentRemote.payload_json);
-      comparisonCandidate = canonicalSnapshot(currentRemote.payload_json.activeSnapshot);
+      return canonicalSnapshot(currentRemote.payload_json.activeSnapshot);
     }
   } catch (error) {
     throw new Error(`Snapshot pembanding tidak dapat disiapkan: ${safeUserError(error, 'data remote tidak valid')}`);
   }
-  const activeSnapshot = canonicalSnapshot(State.activeSnapshot);
+  return null;
+}
+/**
+ * Membangun payload publikasi yang SUDAH disanitasi menurut Publish Scope.
+ * comparisonCandidate = kandidat canonical dari publikasi aktif saat ini (boleh null).
+ */
+function buildPublishedPayloadForScope(regions, comparisonCandidate) {
+  if (!requireAdmin('memublikasikan data')) throw new Error('Akses admin diperlukan.');
+  if (!State.activeSnapshot) throw new Error('Snapshot lokal aktif wajib tersedia.');
+  const regionKeySet = toRegionKeySet(regions);
+  if (!regionKeySet.size) throw new Error('Pilih minimal satu Regional untuk dipublikasikan.');
+
+  const activeSnapshot = createPublishScopedSnapshot(State.activeSnapshot, regionKeySet);
+  if (!activeSnapshot || !activeSnapshot.rawRecords.length) throw new Error('Tidak ada data pada Regional yang dipilih.');
   if (isCurrentTatSnapshot(activeSnapshot) && !isValidTatMtdValue(activeSnapshot.tatMtd)) throw new Error('TAT MTD snapshot aktif tidak valid. Upload ulang file sumber.');
-  const comparisonSnapshot = comparisonCandidate && areSnapshotFormulasCompatible(activeSnapshot, comparisonCandidate) ? comparisonCandidate : null;
+
+  // Snapshot pembanding memakai Publish Scope yang SAMA -> Regional yang dikeluarkan tidak bocor lewat comparison.
+  let comparisonSnapshot = null;
+  if (comparisonCandidate && areSnapshotFormulasCompatible(activeSnapshot, comparisonCandidate)) {
+    const scopedComparison = createPublishScopedSnapshot(comparisonCandidate, regionKeySet);
+    if (scopedComparison && scopedComparison.rawRecords.length) comparisonSnapshot = scopedComparison;
+  }
+
+  const publishStatuses = getActiveStatusSalesmanFilter();
   const recordCount = activeSnapshot.rawRecords.length;
-  const eligibleCount = Number(State.validation.totalEligible || 0);
+  // Eligible dihitung ULANG dari PUBLIC DATA (bukan State.validation yang mencerminkan Global Filter Admin).
+  const eligibleCount = Number(validateDataset(
+    activeSnapshot.rawRecords.filter(record => publishStatuses.has(getEffectiveSalesmanStatus(record)))
+  ).totalEligible || 0);
+  const includedRegions = getPublishScopeRegionOptions(State.activeSnapshot)
+    .map(option => option.value)
+    .filter(value => regionKeySet.has(value));
+
   const payload = {
     schemaVersion: 1,
     publishedAt: new Date().toISOString(),
@@ -4360,6 +4621,8 @@ async function buildPublishedPayload() {
       tatMtd: activeSnapshot.tatMtd,
       tatFormulaVersion: activeSnapshot.tatFormulaVersion,
       workdayMtd: activeSnapshot.workdayMtd,
+      // Metadata opsional & non-breaking (schemaVersion tetap 1). Sengaja TIDAK memuat excludedRegions.
+      publishScope: { mode: 'selected_regions', includedRegions, includedRegionCount: includedRegions.length }
     },
     activeSnapshot,
     comparisonSnapshot,
@@ -4367,17 +4630,50 @@ async function buildPublishedPayload() {
       ...State.settings,
       weights: { ...State.settings.weights },
       detailKpiCharts: { ...(State.settings.detailKpiCharts || {}) },
-      statusSalesmanFilter: [...getActiveStatusSalesmanFilter()]
+      statusSalesmanFilter: [...publishStatuses]
     },
-    masterCabang: {
-      rows: State.masterCabang && Array.isArray(State.masterCabang.rows) ? State.masterCabang.rows : [],
-      uploadedAt: State.masterCabang ? State.masterCabang.uploadedAt || null : null,
-      fileName: State.masterCabang ? State.masterCabang.fileName || null : null
-    },
-    vacantEntries: Array.isArray(State.vacantEntries) ? State.vacantEntries : []
+    masterCabang: sanitizeMasterCabangForPublish(activeSnapshot.rawRecords, regionKeySet),
+    vacantEntries: sanitizeVacantEntriesForPublish(activeSnapshot.rawRecords, regionKeySet)
   };
   validatePublishedPayload(payload);
+  validatePublishScopeIsolation(payload, regionKeySet);
   return payload;
+}
+// Ringkasan preview (dihitung dari payload sanitized yang sama dengan yang akan dikirim).
+function buildPublishScopePreview(payload, regionKeySet) {
+  const sourceRecords = Array.isArray(State.activeSnapshot && State.activeSnapshot.rawRecords) ? State.activeSnapshot.rawRecords : [];
+  const publicRecords = payload.activeSnapshot.rawRecords;
+  const depoKeys = new Set(publicRecords.map(getDepoKey));
+  const assKeys = new Set(publicRecords.map(getAssKey));
+  const cabangNames = new Set(payload.masterCabang.rows.map(row => String(row && row.cabang || '').trim()).filter(Boolean));
+  return {
+    regionSource: getPublishScopeRegionOptions(State.activeSnapshot).length,
+    regionPublic: regionKeySet.size,
+    salesmanSource: sourceRecords.length,
+    salesmanPublic: publicRecords.length,
+    salesmanExcluded: sourceRecords.length - publicRecords.length,
+    cabang: cabangNames.size,
+    depo: depoKeys.size,
+    ass: assKeys.size,
+    eligible: payload.metadata.eligibleCount,
+    notEligible: payload.metadata.recordCount - payload.metadata.eligibleCount,
+    masterCabang: payload.masterCabang.rows.length,
+    vacant: payload.vacantEntries.length,
+    bytes: estimatedPayloadBytes(payload)
+  };
+}
+/**
+ * API async existing dipertahankan namanya. Sekarang WAJIB menerima Publish Scope Regional.
+ * Bila tidak diberikan, default = SELURUH Regional pada snapshot lokal Admin (perilaku lama, aman).
+ */
+async function buildPublishedPayload(regions) {
+  if (!requireAdmin('memublikasikan data')) throw new Error('Akses admin diperlukan.');
+  if (!State.activeSnapshot) throw new Error('Snapshot lokal aktif wajib tersedia.');
+  const scope = regions === undefined || regions === null
+    ? getPublishScopeRegionOptions(State.activeSnapshot).map(option => option.value)
+    : regions;
+  const comparisonCandidate = await fetchPublishComparisonCandidate();
+  return buildPublishedPayloadForScope(scope, comparisonCandidate);
 }
 function normalizeRemotePublication(remoteMeta, source, cachedAt) {
   const payload = remoteMeta && remoteMeta.payload_json ? remoteMeta.payload_json : remoteMeta && remoteMeta.payload;
@@ -4557,58 +4853,157 @@ function formatBytes(bytes) {
 }
 async function openPublishNationalDialog() {
   if (!requireAdmin('memublikasikan data') || State.publicationBusy) return;
+  if (!State.activeSnapshot) { showToast('Snapshot lokal aktif belum tersedia.', 'error'); return; }
+  // Sumber daftar Regional SELALU snapshot lokal Admin PENUH — sengaja TIDAK membaca
+  // State.activeRegionFilters / State.activePhaseFilters (itu analysis filter, bukan publish scope).
+  const regionOptions = getPublishScopeRegionOptions(State.activeSnapshot);
+  if (!regionOptions.length) { showToast('Snapshot aktif tidak memiliki data Regional.', 'error'); return; }
+
   showLoadingOverlay('Menyiapkan payload publikasi...');
+  let comparisonCandidate = null;
   try {
-    const payload = await buildPublishedPayload();
-    const bytes = estimatedPayloadBytes(payload);
-    const meta = payload.metadata;
-    hideLoadingOverlay();
-    const overlay = openModal(`<div class="detail-header"><h2>Publikasikan Data Nasional</h2><div class="detail-sub">Periksa ringkasan sebelum mengganti data aktif Viewer.</div></div>
-      <dl class="publication-summary">
-        <dt>Tanggal cutoff</dt><dd>${escapeHtml(meta.cutoffDate)}</dd>
-        <dt>Revision</dt><dd>${fmtNumber(meta.revisionNumber)}</dd>
-        <dt>File sumber</dt><dd>${escapeHtml(meta.fileName)}</dd>
-        <dt>Jumlah record</dt><dd>${fmtNumber(meta.recordCount)}</dd>
-        <dt>Eligible</dt><dd>${fmtNumber(meta.eligibleCount)}</dd>
-        <dt>Not eligible</dt><dd>${fmtNumber(meta.recordCount - meta.eligibleCount)}</dd>
-        <dt>Master Cabang</dt><dd>${fmtNumber(payload.masterCabang.rows.length)}</dd>
-        <dt>VACANT</dt><dd>${fmtNumber(payload.vacantEntries.length)}</dd>
-        <dt>Ukuran JSON</dt><dd>${formatBytes(bytes)}</dd>
-        <dt>Waktu publikasi</dt><dd>${fmtDateTimeId(Date.parse(payload.publishedAt))}</dd>
-      </dl>
-      <div class="alert alert-warn">Data aktif Viewer akan diganti. Snapshot lokal Admin tetap tersimpan.</div>
-      <div class="form-error" id="publish-error" role="alert"></div>
-      <div class="modal-actions">
-        <button type="button" class="btn btn-ghost" id="publish-cancel">Batal</button>
-        <button type="button" class="btn btn-primary" id="publish-confirm">Ya, Publikasikan</button>
-      </div>`, { wide: true });
-    overlay.querySelector('#publish-cancel').addEventListener('click', () => overlay.querySelector('[data-act="close"]').click());
-    overlay.querySelector('#publish-confirm').addEventListener('click', async () => {
-      if (State.publicationBusy) return;
-      State.publicationBusy = true;
-      const button = overlay.querySelector('#publish-confirm');
-      const errorEl = overlay.querySelector('#publish-error');
-      button.disabled = true;
-      button.textContent = 'Memublikasikan...';
-      errorEl.textContent = '';
-      try {
-        const snapshotId = await window.SupabaseService.publishNationalSnapshot(payload, meta);
-        State.remotePublication = normalizeRemotePublication(await window.SupabaseService.getActivePublishedSnapshot(), 'supabase');
-        overlay.querySelector('[data-act="close"]').click();
-        showToast(`Publikasi berhasil. Snapshot ID: ${snapshotId}`, 'success');
-        renderTopbar(parseHash().path, parseHash().params);
-      } catch (error) {
-        errorEl.textContent = safeUserError(error, 'Publikasi gagal.');
-        button.disabled = false;
-        button.textContent = 'Ya, Publikasikan';
-      } finally {
-        State.publicationBusy = false;
-      }
-    });
+    comparisonCandidate = await fetchPublishComparisonCandidate();
   } catch (error) {
     hideLoadingOverlay();
     showToast(safeUserError(error, 'Payload publikasi gagal disiapkan.'), 'error');
+    return;
   }
+
+  // Default AMAN: setiap dialog dibuka, seluruh Regional tercentang (tidak mengingat pilihan lama).
+  const selected = new Set(regionOptions.map(option => option.value));
+  let previewPayload = null;
+
+  const overlay = openModal(`<div class="detail-header"><h2>Publikasikan Data Nasional</h2><div class="detail-sub">Pilih Regional yang boleh dikirim ke Viewer, lalu periksa ringkasan sebelum mengganti data aktif Viewer.</div></div>
+    <div class="publish-scope-section">
+      <div class="publish-scope-head">
+        <h3>Cakupan Publikasi Regional</h3>
+        <label class="dt-filter-option publish-scope-all"><input type="checkbox" id="publish-scope-all" checked /> <strong>Semua Regional</strong></label>
+      </div>
+      <div class="publish-scope-list" id="publish-scope-list">
+        ${regionOptions.map(option => `<label class="dt-filter-option"><input type="checkbox" class="publish-scope-opt" value="${escapeHtml(option.value)}" checked /> ${escapeHtml(option.label)} <span class="status-opt-count">${fmtNumber(option.count)}</span></label>`).join('')}
+      </div>
+    </div>
+    <h3 class="publish-preview-title">Preview Publikasi</h3>
+    <dl class="publication-summary" id="publish-preview"></dl>
+    <div class="alert alert-warn">Hanya Regional yang dipilih beserta seluruh turunannya (Salesman, ASS, Depo, Cabang, Master Cabang, VACANT, dan snapshot pembanding) yang akan dikirim ke Viewer. Snapshot lokal Admin tetap lengkap.</div>
+    <div class="form-error" id="publish-error" role="alert"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="publish-cancel">Batal</button>
+      <button type="button" class="btn btn-primary" id="publish-confirm">Publikasikan</button>
+    </div>`, { wide: true, extraClass: 'modal-publish-scope' });
+  hideLoadingOverlay();
+
+  const listEl = overlay.querySelector('#publish-scope-list');
+  const allCb = overlay.querySelector('#publish-scope-all');
+  const previewEl = overlay.querySelector('#publish-preview');
+  const errorEl = overlay.querySelector('#publish-error');
+  const confirmBtn = overlay.querySelector('#publish-confirm');
+  const optionCbs = () => Array.from(listEl.querySelectorAll('.publish-scope-opt'));
+
+  const row = (label, value) => `<dt>${escapeHtml(label)}</dt><dd>${value}</dd>`;
+  const renderPreview = () => {
+    errorEl.textContent = '';
+    if (!selected.size) {
+      previewPayload = null;
+      previewEl.innerHTML = row('Status', '<span class="publish-preview-empty">Tidak ada Regional dipilih</span>');
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Publikasikan';
+      errorEl.textContent = 'Pilih minimal satu Regional untuk dipublikasikan.';
+      return;
+    }
+    try {
+      previewPayload = buildPublishedPayloadForScope(selected, comparisonCandidate);
+      const p = buildPublishScopePreview(previewPayload, toRegionKeySet(selected));
+      previewEl.innerHTML = [
+        row('Tanggal cutoff', escapeHtml(previewPayload.metadata.cutoffDate)),
+        row('Revision', fmtNumber(previewPayload.metadata.revisionNumber)),
+        row('File sumber', escapeHtml(previewPayload.metadata.fileName)),
+        row('Regional', `${fmtNumber(p.regionPublic)} / ${fmtNumber(p.regionSource)}`),
+        row('Salesman', `${fmtNumber(p.salesmanPublic)} / ${fmtNumber(p.salesmanSource)}`),
+        row('Dikeluarkan', `${fmtNumber(p.salesmanExcluded)} Salesman`),
+        row('Cabang', fmtNumber(p.cabang)),
+        row('Depo', fmtNumber(p.depo)),
+        row('ASS', fmtNumber(p.ass)),
+        row('Eligible', fmtNumber(p.eligible)),
+        row('Not eligible', fmtNumber(p.notEligible)),
+        row('Master Cabang', fmtNumber(p.masterCabang)),
+        row('VACANT', fmtNumber(p.vacant)),
+        row('Pembanding', previewPayload.comparisonSnapshot ? `${fmtNumber(previewPayload.comparisonSnapshot.rawRecords.length)} record (cakupan sama)` : 'Tidak tersedia'),
+        row('Ukuran JSON', formatBytes(p.bytes))
+      ].join('');
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = `Publikasikan ${fmtNumber(p.regionPublic)} Regional`;
+    } catch (error) {
+      previewPayload = null;
+      previewEl.innerHTML = row('Status', '<span class="publish-preview-empty">Payload tidak dapat disiapkan</span>');
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Publikasikan';
+      errorEl.textContent = safeUserError(error, 'Payload publikasi gagal disiapkan.');
+    }
+  };
+  // Preview di-debounce agar dataset besar tidak membuat UI tersendat saat centang beruntun.
+  const schedulePreview = debounce(renderPreview, 140);
+
+  const syncAllCheckbox = () => {
+    const cbs = optionCbs();
+    const checkedCount = cbs.filter(cb => cb.checked).length;
+    allCb.checked = checkedCount === cbs.length;
+    allCb.indeterminate = checkedCount > 0 && checkedCount < cbs.length;
+  };
+  allCb.addEventListener('change', () => {
+    const check = allCb.checked;
+    optionCbs().forEach(cb => { cb.checked = check; });
+    selected.clear();
+    if (check) optionCbs().forEach(cb => selected.add(cb.value));
+    syncAllCheckbox();
+    schedulePreview();
+  });
+  listEl.addEventListener('change', event => {
+    const cb = event.target.closest('.publish-scope-opt');
+    if (!cb) return;
+    if (cb.checked) selected.add(cb.value); else selected.delete(cb.value);
+    syncAllCheckbox();
+    schedulePreview();
+  });
+
+  syncAllCheckbox();
+  renderPreview();
+
+  overlay.querySelector('#publish-cancel').addEventListener('click', () => overlay.querySelector('[data-act="close"]').click());
+  confirmBtn.addEventListener('click', async () => {
+    if (State.publicationBusy || confirmBtn.disabled) return;
+    schedulePreview.cancel();
+    errorEl.textContent = '';
+    // GUARD TERHADAP STALE UI: payload FINAL SELALU dibangun ulang & divalidasi ulang dari
+    // pilihan checkbox terkini, bukan memakai object preview yang mungkin sudah usang.
+    let payload;
+    try {
+      const finalSelection = optionCbs().filter(cb => cb.checked).map(cb => cb.value);
+      if (!finalSelection.length) throw new Error('Pilih minimal satu Regional untuk dipublikasikan.');
+      payload = buildPublishedPayloadForScope(finalSelection, comparisonCandidate);
+      validatePublishScopeIsolation(payload, toRegionKeySet(finalSelection));
+    } catch (error) {
+      errorEl.textContent = safeUserError(error, 'Payload publikasi tidak lolos validasi cakupan Regional.');
+      return;
+    }
+    State.publicationBusy = true;
+    confirmBtn.disabled = true;
+    const originalLabel = confirmBtn.textContent;
+    confirmBtn.textContent = 'Memublikasikan...';
+    try {
+      const snapshotId = await window.SupabaseService.publishNationalSnapshot(payload, payload.metadata);
+      State.remotePublication = normalizeRemotePublication(await window.SupabaseService.getActivePublishedSnapshot(), 'supabase');
+      overlay.querySelector('[data-act="close"]').click();
+      showToast(`Publikasi berhasil (${fmtNumber(payload.metadata.publishScope.includedRegionCount)} Regional). Snapshot ID: ${snapshotId}`, 'success');
+      renderTopbar(parseHash().path, parseHash().params);
+    } catch (error) {
+      errorEl.textContent = safeUserError(error, 'Publikasi gagal.');
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = originalLabel;
+    } finally {
+      State.publicationBusy = false;
+    }
+  });
 }
 function renderPublicationHistoryPage() {
   return `<div class="page-header"><h1>Riwayat Publikasi Nasional</h1><p class="page-sub">Riwayat ini terpisah dari riwayat upload lokal Admin.</p></div>
@@ -4829,7 +5224,8 @@ function activeDataSummaryText() {
   const valid = Number(State.validation.totalEligible || 0);
   const total = Number(State.validation.totalRead || 0);
   const parts = [`Data: ${fmtDateId(State.activeSnapshot.cutoffDate)}`];
-  if (State.activePhaseFilter) parts.push(State.activePhaseFilter);
+  if (State.activePhaseFilters.size) parts.push(globalPhaseFilterLabel());
+  if (State.activeRegionFilters.size) parts.push(globalRegionFilterLabel());
   parts.push(`${fmtNumber(valid)}/${fmtNumber(total)} valid`);
   if (isValidTatMtdValue(State.activeSnapshot.tatMtd)) parts.push(`TAT ${fmtPercent(State.activeSnapshot.tatMtd, 0)}`);
   return parts.join(' • ');
@@ -4847,7 +5243,8 @@ function openActiveDataPopover(button) {
       <div class="topbar-data-popover-label">Tanggal data</div><div class="topbar-data-popover-value">${fmtDateId(snapshot.cutoffDate)}</div>
       <div class="topbar-data-popover-label">Revisi</div><div class="topbar-data-popover-value">${fmtNumber(snapshot.revisionNumber || 1)}</div>
       <div class="topbar-data-popover-label">Waktu upload</div><div class="topbar-data-popover-value">${fmtDateTimeId(snapshot.uploadedAt)}</div>
-      <div class="topbar-data-popover-label">Phase aktif</div><div class="topbar-data-popover-value">${escapeHtml(State.activePhaseFilter || 'Semua Phase')}</div>
+      <div class="topbar-data-popover-label">Phase aktif</div><div class="topbar-data-popover-value">${escapeHtml(State.activePhaseFilters.size ? globalPhaseFilterValues().join(', ') : 'Semua Phase')}</div>
+      <div class="topbar-data-popover-label">Regional aktif</div><div class="topbar-data-popover-value">${escapeHtml(State.activeRegionFilters.size ? globalRegionFilterValues().join(', ') : 'Semua Regional')}</div>
       <div class="topbar-data-popover-label">Data valid</div><div class="topbar-data-popover-value">${fmtNumber(State.validation.totalEligible || 0)}</div>
       <div class="topbar-data-popover-label">Bermasalah</div><div class="topbar-data-popover-value">${fmtNumber(State.validation.totalNotEligible || 0)}</div>
       <div class="topbar-data-popover-label">EC vs Call Total</div><div class="topbar-data-popover-value">TOTAL CALL ESUITE</div>
@@ -4896,7 +5293,8 @@ function statusSalesmanVacantWarningText() {
 function statusSalesmanCsvMetadataRows() {
   const active = getActiveStatusSalesmanFilter();
   const labels = STATUS_SALESMAN_ALL.filter(s => active.has(s)).map(s => STATUS_SALESMAN_LABELS[s]);
-  const rows = [['Status Salesman', labels.join('; ')]];
+  // Global Filter (Phase + Regional) ikut pada SELURUH export CSV lewat satu sumber metadata ini.
+  const rows = [...globalScopeCsvMetadataRows(), ['Status Salesman', labels.join('; ')]];
   if (active.has('VACANT')) rows.push(['Peringatan', 'Posisi VACANT disertakan dalam perhitungan']);
   return rows;
 }
@@ -4906,6 +5304,112 @@ function statusSalesmanJpgChips() {
   const warning = statusSalesmanVacantWarningText();
   if (warning) chips.push(warning);
   return chips;
+}
+/* ------------------------------------------------------------
+   POPOVER MULTI-SELECT GLOBAL (Phase & Regional)
+   Mengikuti visual language popover Status Salesman existing (card, border, shadow, checkbox,
+   judul, scroll, Reset, Terapkan). Memakai DRAFT selection: dataset global baru berubah saat
+   [Terapkan] ditekan, bukan setiap checkbox diklik.
+   ------------------------------------------------------------ */
+let __globalMultiPopoverOutsideHandler = () => {};
+let __globalMultiPopoverKeyHandler = () => {};
+function closeGlobalMultiPopover() {
+  const existing = document.getElementById('topbar-global-multi-popover');
+  if (existing) existing.remove();
+  document.removeEventListener('click', __globalMultiPopoverOutsideHandler, true);
+  document.removeEventListener('keydown', __globalMultiPopoverKeyHandler, true);
+  __globalMultiPopoverOutsideHandler = () => {};
+  __globalMultiPopoverKeyHandler = () => {};
+  document.querySelectorAll('.topbar-global-filter-btn[aria-expanded="true"]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+}
+function openGlobalMultiSelectPopover(buttonEl, config) {
+  // Hanya satu popover global boleh terbuka pada satu waktu.
+  closeGlobalMultiPopover();
+  closeStatusSalesmanPopover();
+  closeActiveDataPopover();
+  const options = Array.isArray(config.options) ? config.options : [];
+  const selected = new Set(config.selected || []);
+  const popover = document.createElement('div');
+  popover.id = 'topbar-global-multi-popover';
+  popover.className = 'dt-filter-popover topbar-status-popover topbar-global-multi-popover';
+  popover.setAttribute('role', 'dialog');
+  popover.innerHTML = `
+    <div class="dt-filter-popover-title">${escapeHtml(config.title)}</div>
+    <div class="dt-filter-options topbar-global-multi-options">
+      <label class="dt-filter-option"><input type="checkbox" class="gm-select-all" ${selected.size === 0 ? 'checked' : ''} /> <strong>${escapeHtml(config.allLabel)}</strong></label>
+      ${options.length
+        ? options.map(opt => `<label class="dt-filter-option"><input type="checkbox" class="gm-opt" value="${escapeHtml(opt.value)}" ${selected.has(opt.value) ? 'checked' : ''} /> ${escapeHtml(opt.label)}${Number.isFinite(opt.count) ? ` <span class="status-opt-count">${fmtNumber(opt.count)}</span>` : ''}</label>`).join('')
+        : '<div class="muted" style="padding:6px 4px;">Tidak ada opsi pada snapshot aktif.</div>'}
+    </div>
+    <div class="dt-filter-actions">
+      <button type="button" class="btn btn-ghost btn-sm gm-reset">Reset</button>
+      <button type="button" class="btn btn-primary btn-sm gm-apply">Terapkan</button>
+    </div>`;
+  document.body.appendChild(popover);
+  const rect = buttonEl.getBoundingClientRect();
+  const width = Math.max(230, Math.min(300, config.width || 260));
+  popover.style.position = 'fixed';
+  popover.style.top = `${rect.bottom + 6}px`;
+  popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 12))}px`;
+  popover.style.width = `${width}px`;
+  popover.style.zIndex = '2600';
+  buttonEl.setAttribute('aria-expanded', 'true');
+
+  const selectAll = popover.querySelector('.gm-select-all');
+  const optionCbs = () => Array.from(popover.querySelectorAll('.gm-opt'));
+  // "Semua" bukan nilai data: memilihnya membersihkan pilihan spesifik, dan memilih item spesifik
+  // otomatis mematikan "Semua" -> state tidak pernah ambigu (Semua + R05 bersamaan).
+  const syncAllState = () => { selectAll.checked = optionCbs().every(cb => !cb.checked); };
+  selectAll.addEventListener('change', () => {
+    if (selectAll.checked) optionCbs().forEach(cb => { cb.checked = false; });
+    else selectAll.checked = true; // "Semua" tidak bisa dimatikan tanpa memilih item spesifik
+  });
+  optionCbs().forEach(cb => cb.addEventListener('change', syncAllState));
+  popover.querySelector('.gm-reset').addEventListener('click', () => {
+    optionCbs().forEach(cb => { cb.checked = false; });
+    selectAll.checked = true;
+  });
+  popover.querySelector('.gm-apply').addEventListener('click', () => {
+    const chosen = selectAll.checked ? [] : optionCbs().filter(cb => cb.checked).map(cb => cb.value);
+    closeGlobalMultiPopover();
+    config.onApply(chosen);
+  });
+  __globalMultiPopoverOutsideHandler = event => {
+    if (!popover.contains(event.target) && event.target !== buttonEl && !buttonEl.contains(event.target)) closeGlobalMultiPopover();
+  };
+  __globalMultiPopoverKeyHandler = event => { if (event.key === 'Escape') closeGlobalMultiPopover(); };
+  setTimeout(() => {
+    document.addEventListener('click', __globalMultiPopoverOutsideHandler, true);
+    document.addEventListener('keydown', __globalMultiPopoverKeyHandler, true);
+  }, 0);
+}
+// Jumlah baris per opsi dihitung dari raw snapshot pada dimensi LAIN yang sedang aktif
+// (Phase menghitung dengan Regional aktif, dan sebaliknya) agar angka konsisten dengan AND antar dimensi.
+function globalPhaseOptionRows() {
+  const records = applyGlobalScope(State.activeSnapshot ? State.activeSnapshot.rawRecords : [], new Set(), State.activeRegionFilters);
+  const counts = new Map();
+  records.forEach(r => { const v = phaseValueOfRecord(r); if (v) counts.set(v, (counts.get(v) || 0) + 1); });
+  return getPhaseOptions().map(value => ({ value, label: value, count: counts.get(value) || 0 }));
+}
+function globalRegionOptionRows() {
+  const records = applyGlobalScope(State.activeSnapshot ? State.activeSnapshot.rawRecords : [], State.activePhaseFilters, new Set());
+  const counts = new Map();
+  records.forEach(r => { const v = regionValueOfRecord(r); if (v) counts.set(v, (counts.get(v) || 0) + 1); });
+  return getRegionOptions().map(value => ({ value, label: value, count: counts.get(value) || 0 }));
+}
+function openGlobalPhaseFilterPopover(buttonEl) {
+  openGlobalMultiSelectPopover(buttonEl, {
+    title: 'Phase', allLabel: 'Semua Phase', options: globalPhaseOptionRows(),
+    selected: State.activePhaseFilters, width: 260,
+    onApply: values => applyGlobalScopeFilters({ phases: values })
+  });
+}
+function openGlobalRegionFilterPopover(buttonEl) {
+  openGlobalMultiSelectPopover(buttonEl, {
+    title: 'Regional', allLabel: 'Semua Regional', options: globalRegionOptionRows(),
+    selected: State.activeRegionFilters, width: 280,
+    onApply: values => applyGlobalScopeFilters({ regions: values })
+  });
 }
 function closeStatusSalesmanPopover() {
   const existing = document.getElementById('topbar-status-popover');
@@ -4974,10 +5478,14 @@ async function setActiveStatusSalesmanFilter(statuses) {
 function renderTopbar(path, params) {
   closeActiveDataPopover();
   closeStatusSalesmanPopover();
+  closeGlobalMultiPopover();
   const el = document.getElementById('topbar');
   const crumbs = buildBreadcrumb(path, params);
   const phaseOptions = getPhaseOptions();
-  const showPhaseFilter = State.activeSnapshot && phaseOptions.length > 0 && path !== '/ranking-phase';
+  const regionOptions = getRegionOptions();
+  // Global Filter berlaku untuk SEMUA halaman termasuk Ranking Phase (Phase kini multi-select).
+  const showPhaseFilter = !!State.activeSnapshot && phaseOptions.length > 0;
+  const showRegionFilter = !!State.activeSnapshot && regionOptions.length > 0;
   const showStatusFilter = !!State.activeSnapshot;
   const vacantIncluded = showStatusFilter && getActiveStatusSalesmanFilter().has('VACANT');
   const dataSummary = activeDataSummaryText();
@@ -4989,12 +5497,11 @@ function renderTopbar(path, params) {
     ${dataSummary ? `<button type="button" class="topbar-data-summary" id="topbar-data-summary" aria-expanded="false"><span class="dot"></span>${escapeHtml(dataSummary)}</button>` : ''}
     ${showPhaseFilter ? `
       <div class="topbar-phase-filter">
-        <label class="topbar-phase-label">Phase:
-          <select id="topbar-phase-select">
-            <option value="">Semua Phase</option>
-            ${phaseOptions.map(p => `<option value="${escapeHtml(p)}" ${State.activePhaseFilter === p ? 'selected' : ''}>${escapeHtml(p)}</option>`).join('')}
-          </select>
-        </label>
+        <button type="button" class="btn btn-outline btn-sm topbar-global-filter-btn" id="topbar-phase-btn" aria-expanded="false" aria-haspopup="dialog" title="Filter global Phase (boleh lebih dari satu)">Phase: ${escapeHtml(globalPhaseFilterLabel())} ▾</button>
+      </div>` : ''}
+    ${showRegionFilter ? `
+      <div class="topbar-phase-filter">
+        <button type="button" class="btn btn-outline btn-sm topbar-global-filter-btn" id="topbar-region-btn" aria-expanded="false" aria-haspopup="dialog" title="Filter global Regional (boleh lebih dari satu)">Regional: ${escapeHtml(globalRegionFilterLabel())} ▾</button>
       </div>` : ''}
     ${showStatusFilter ? `
       <div class="topbar-phase-filter">
@@ -5021,8 +5528,10 @@ function renderTopbar(path, params) {
   const publicationHistoryBtn = document.getElementById('topbar-publication-history-btn'); if (publicationHistoryBtn) publicationHistoryBtn.addEventListener('click', () => navigate('/publication-history'));
   const dataBtn = document.getElementById('topbar-data-summary');
   if (dataBtn) dataBtn.addEventListener('click', (event) => { event.stopPropagation(); __activeDataPopover ? closeActiveDataPopover() : openActiveDataPopover(dataBtn); });
-  const phaseSelect = document.getElementById('topbar-phase-select');
-  if (phaseSelect) phaseSelect.addEventListener('change', (e) => setActivePhaseFilter(e.target.value || null));
+  const phaseBtn = document.getElementById('topbar-phase-btn');
+  if (phaseBtn) phaseBtn.addEventListener('click', (event) => { event.stopPropagation(); if (document.getElementById('topbar-global-multi-popover') && phaseBtn.getAttribute('aria-expanded') === 'true') { closeGlobalMultiPopover(); return; } openGlobalPhaseFilterPopover(phaseBtn); });
+  const regionBtn = document.getElementById('topbar-region-btn');
+  if (regionBtn) regionBtn.addEventListener('click', (event) => { event.stopPropagation(); if (document.getElementById('topbar-global-multi-popover') && regionBtn.getAttribute('aria-expanded') === 'true') { closeGlobalMultiPopover(); return; } openGlobalRegionFilterPopover(regionBtn); });
   const statusBtn = document.getElementById('topbar-status-btn');
   if (statusBtn) statusBtn.addEventListener('click', (event) => { event.stopPropagation(); openStatusSalesmanPopover(statusBtn); });
 }
@@ -5775,27 +6284,23 @@ function detailKpiCabangOfRecord(rec) {
 // (5) filter Scope Cabang/Regional/Depo/ASS pada RAW record (SEBELUM agregasi), (6) validateDataset,
 // (7) buildHierarchy. Dipakai bersama oleh Ringkasan/Distribusi/Top-Bottom/Tabel/CSV/JPG/popup bucket/drill-down
 // Detail KPI — jangan menulis logika filter berbeda di banyak tempat.
-function buildDetailKpiScopedHierarchy(scope, scopeValue, phaseOverride) {
+function buildDetailKpiScopedHierarchy(scope, scopeValue) {
   if (!State.activeSnapshot) return null;
-  const usingActivePhase = phaseOverride === undefined;
-  const phase = usingActivePhase ? State.activePhaseFilter : phaseOverride;
-  // Scope Nasional (atau tanpa scopeValue) pada Phase aktif = identik State.hierarchy yang sudah dibangun
-  // (Phase + Status Salesman + Master Cabang sudah tercakup) - reuse, tidak perlu membangun ulang.
-  if ((scope === 'nasional' || !scopeValue) && usingActivePhase) return State.hierarchy;
-  const cacheKey = `${hierarchyCacheFingerprint()}|dk|ph:${phase || ''}|sc:${scope || ''}|sv:${scopeValue || ''}`;
+  // Scope Nasional (atau tanpa scopeValue) = identik State.hierarchy yang sudah dibangun dari Global Scope
+  // (Phase + Regional + Status Salesman + Master Cabang sudah tercakup) - reuse, tidak membangun ulang.
+  if (scope === 'nasional' || !scopeValue) return State.hierarchy;
+  const cacheKey = `${hierarchyCacheFingerprint()}|dk|sc:${scope || ''}|sv:${scopeValue || ''}`;
   if (State.detailKpiHierarchyCache.has(cacheKey)) return State.detailKpiHierarchyCache.get(cacheKey);
   const __t0 = PERF_DEBUG ? performance.now() : 0;
-  const allRecords = Array.isArray(State.activeSnapshot.rawRecords) ? State.activeSnapshot.rawRecords : [];
-  let records = phase ? allRecords.filter(rec => String(rec.phaseProject || '').trim() === String(phase).trim()) : allRecords;
-  const activeStatuses = getActiveStatusSalesmanFilter();
-  records = records.filter(rec => activeStatuses.has(getEffectiveSalesmanStatus(rec)));
+  // Universe Detail KPI = Global Scope + Status Salesman (helper terpusat), baru difilter Scope halaman.
+  let records = getCalculationRecords(State.activeSnapshot);
   if (scope === 'cabang' && scopeValue) records = records.filter(rec => detailKpiCabangOfRecord(rec) === scopeValue);
   else if (scope === 'regional' && scopeValue) records = records.filter(rec => rec.region === scopeValue);
   else if (scope === 'depo' && scopeValue) records = records.filter(rec => getDepoKey(rec) === scopeValue);
   else if (scope === 'ass' && scopeValue) records = records.filter(rec => getAssKey(rec) === scopeValue);
   const validation = validateDataset(records);
   const hierarchy = buildHierarchy(validation, State.settings);
-  hierarchy.__phaseName = phase || null;
+  hierarchy.__phaseName = globalPhaseFilterLabel();
   hierarchy.__validation = validation;
   if (PERF_DEBUG) perfLog('buildDetailKpiScopedHierarchy (cache miss)', __t0, `scope=${scope} value=${scopeValue}`);
   return cachePutBounded(State.detailKpiHierarchyCache, cacheKey, hierarchy);
@@ -5806,8 +6311,9 @@ function buildHierarchyForSpecificPhase(phaseName) {
   if (State.phaseHierarchyCache.has(cacheKey)) return State.phaseHierarchyCache.get(cacheKey);
   const __t0 = PERF_DEBUG ? performance.now() : 0;
   const activeStatuses = getActiveStatusSalesmanFilter();
-  const records = (State.activeSnapshot.rawRecords || []).filter(record =>
-    String(record.phaseProject || '').trim() === String(phaseName || '').trim() && activeStatuses.has(getEffectiveSalesmanStatus(record))
+  // Satu Phase tertentu, tetapi Global Regional + Status Salesman tetap berlaku.
+  const records = applyGlobalScope(State.activeSnapshot.rawRecords || [], new Set(), State.activeRegionFilters).filter(record =>
+    phaseValueOfRecord(record) === String(phaseName || '').trim() && activeStatuses.has(getEffectiveSalesmanStatus(record))
   );
   const validation = validateDataset(records);
   const hierarchy = buildHierarchy(validation, State.settings);
@@ -5817,8 +6323,14 @@ function buildHierarchyForSpecificPhase(phaseName) {
   cachePutBounded(State.phaseHierarchyCache, cacheKey, hierarchy);
   return hierarchy;
 }
+// Baris Ranking Phase = Phase yang terpilih pada Global Filter (atau seluruh Phase bila "Semua").
+function getScopedPhaseNames() {
+  const all = getPhaseOptions();
+  if (!State.activePhaseFilters || !State.activePhaseFilters.size) return all;
+  return all.filter(name => State.activePhaseFilters.has(name));
+}
 function getPhaseRankingRows() {
-  return getPhaseOptions().map(phaseName => {
+  return getScopedPhaseNames().map(phaseName => {
     const hierarchy = buildHierarchyForSpecificPhase(phaseName);
     const national = hierarchy && hierarchy.national;
     if (!national) return null;
@@ -5874,7 +6386,7 @@ function wireRankingPhasePage() {
     ],
     rowDetailFn: row => openRankingDrilldownModal('phase', row, { hierarchy: row.__phaseHierarchy, phase: row.phaseName }),
     jpgTitle: 'RANKING PHASE', jpgFilename: 'Ranking_Phase', jpgKpiSummary: true,
-    jpgFilterSummary: () => [...statusSalesmanJpgChips(), 'Scope: Semua Phase', ...headerFilterSummaryChips(table, { 'meta.phase': 'Phase' }), ...(table.searchTerm ? [`Pencarian: ${table.searchTerm}`] : [])]
+    jpgFilterSummary: () => [...statusSalesmanJpgChips(), ...globalScopeSummaryChips(), ...headerFilterSummaryChips(table, { 'meta.phase': 'Phase' }), ...(table.searchTerm ? [`Pencarian: ${table.searchTerm}`] : [])]
   });
   table.render();
 }
@@ -5905,7 +6417,7 @@ function wireRankingRegionalPage() {
       { key: 'finalScore', type: 'number-range', label: 'Final Score', placeholderMin: 'Minimum', placeholderMax: 'Maksimum' },
       { key: 'category.label', type: 'multi-select', label: 'Kategori', placeholder: 'Semua Kategori' }
     ],
-    rowDetailFn: (row) => openRankingDrilldownModal('regional', row, { hierarchy: State.hierarchy, phase: State.activePhaseFilter }),
+    rowDetailFn: (row) => openRankingDrilldownModal('regional', row, { hierarchy: State.hierarchy, phase: globalPhaseFilterLabel() }),
     jpgTitle: 'RANKING REGIONAL NASIONAL', jpgFilename: 'Ranking_Regional_Nasional', jpgKpiSummary: true,
     jpgFilterSummary: () => [...statusSalesmanJpgChips(), ...phaseSummaryChip(), ...headerFilterSummaryChips(table, { 'meta.region': 'Regional' }), ...(table.searchTerm ? [`Pencarian: ${table.searchTerm}`] : [])]
   });
@@ -5950,7 +6462,7 @@ function wireRankingCabangPage() {
       { key: 'finalScore', type: 'number-range', label: 'Final Score', placeholderMin: 'Minimum', placeholderMax: 'Maksimum' },
       { key: 'category.label', type: 'multi-select', label: 'Kategori', placeholder: 'Semua Kategori' }
     ],
-    rowDetailFn: (row) => openRankingDrilldownModal('cabang', row, { hierarchy: State.hierarchy, phase: State.activePhaseFilter }),
+    rowDetailFn: (row) => openRankingDrilldownModal('cabang', row, { hierarchy: State.hierarchy, phase: globalPhaseFilterLabel() }),
     jpgTitle: 'RANKING CABANG NASIONAL', jpgFilename: 'Ranking_Cabang_Nasional', jpgKpiSummary: true,
     jpgFilterSummary: () => [...statusSalesmanJpgChips(), ...phaseSummaryChip(), ...headerFilterSummaryChips(table, { 'meta.cabang': 'Cabang', 'meta.region': 'Regional' }), ...(table.searchTerm ? [`Pencarian: ${table.searchTerm}`] : [])]
   });
@@ -6010,7 +6522,7 @@ function wireRankingDepoPage(params) {
       { key: 'finalScore', type: 'number-range', label: 'Final Score', placeholderMin: 'Minimum', placeholderMax: 'Maksimum' },
       { key: 'category.label', type: 'multi-select', label: 'Kategori', placeholder: 'Semua Kategori' }
     ],
-    rowDetailFn: (row) => openRankingDrilldownModal('depo', row, { hierarchy: State.hierarchy, phase: State.activePhaseFilter }),
+    rowDetailFn: (row) => openRankingDrilldownModal('depo', row, { hierarchy: State.hierarchy, phase: globalPhaseFilterLabel() }),
     jpgTitle, jpgFilename, jpgKpiSummary: true,
     jpgFilterSummary: () => {
       const chips = [...statusSalesmanJpgChips(), ...phaseSummaryChip(), activeTab === 'regional' ? `Regional: ${activeRegion}` : 'Scope: Nasional', ...headerFilterSummaryChips(table, { 'meta.depo': 'Nama Depo', 'meta.region': 'Regional' })];
@@ -6093,7 +6605,7 @@ function wireRankingAssPage(params) {
       { key: 'finalScore', type: 'number-range', label: 'Final Score', placeholderMin: 'Minimum', placeholderMax: 'Maksimum' },
       { key: 'category.label', type: 'multi-select', label: 'Kategori', placeholder: 'Semua Kategori' }
     ],
-    rowDetailFn: (row) => openRankingDrilldownModal('ass', row, { hierarchy: State.hierarchy, phase: State.activePhaseFilter }),
+    rowDetailFn: (row) => openRankingDrilldownModal('ass', row, { hierarchy: State.hierarchy, phase: globalPhaseFilterLabel() }),
     jpgTitle: `RANKING ASS — ${jpgTitleSuffix}`, jpgFilename: `Ranking_ASS_${jpgFileSuffix}`, jpgKpiSummary: true,
     jpgFilterSummary: () => { const chips = [...statusSalesmanJpgChips(), ...phaseSummaryChip(), scopeLabel, ...headerFilterSummaryChips(table, { 'meta.namaAss': 'Nama ASS', 'meta.depo': 'Depo', 'meta.region': 'Regional' })]; if (table.searchTerm) chips.push(`Pencarian: ${table.searchTerm}`); return chips; }
   });
@@ -6710,7 +7222,8 @@ function drilldownColumns(level) {
 function openRankingDrilldownModal(startLevel, startRow, options = {}) {
   const hierarchy = options.hierarchy || State.hierarchy;
   if (!hierarchy || !startRow) { showToast('Data drill-down tidak tersedia.', 'info'); return; }
-  const phaseName = options.phase || hierarchy.__phaseName || State.activePhaseFilter || null;
+  // Data drill-down berasal dari `hierarchy` yang SUDAH dibangun dari Global Scope — nilai ini hanya label.
+  const phaseName = options.phase || hierarchy.__phaseName || globalPhaseFilterLabel() || null;
   const stack = [{ level: startLevel, row: startRow }];
   const overlay = openModal('<div class="drilldown-shell" id="ranking-drilldown-shell"></div>', { wide: true, extraClass: 'modal-ranking-drilldown' });
   const shell = overlay.querySelector('#ranking-drilldown-shell');
@@ -6786,7 +7299,7 @@ function openRegionalDepoPerformanceModal(regionRow) {
     <div class="regional-performance-modal-header">
       <div>
         <h2>Pencapaian Depo — ${escapeHtml(regionName)}</h2>
-        <div class="detail-sub">Ringkasan pencapaian operasional seluruh Depo di bawah Regional ini.${State.activePhaseFilter ? ` <strong>(Phase: ${escapeHtml(State.activePhaseFilter)})</strong>` : ''}</div>
+        <div class="detail-sub">Ringkasan pencapaian operasional seluruh Depo di bawah Regional ini.${globalScopeSummaryChips().length ? ` <strong>(${escapeHtml(globalScopeSummaryChips().join(' • '))})</strong>` : ''}</div>
       </div>
       <div class="regional-performance-actions">
         <button class="btn btn-outline btn-sm" id="regional-depo-export-csv-btn" aria-label="Export Pencapaian Depo sebagai CSV">⬇ Export CSV</button>
@@ -7189,15 +7702,14 @@ function detailKpiPredicateForScope(scopeLevel, scopeKey) {
 // G2/L1(lama)/I: bangun hierarchy untuk SATU step drill-down popup bucket, dari raw record yang difilter Phase +
 // Status Salesman + Scope Detail KPI aktif (outer) + narrowing drill-down saat ini (jika ada). Dengan ini, KPI
 // child SELALU dihitung ulang hanya dari member pada scope drill aktif — bukan menyalin/membagi nilai parent (I).
-function buildDetailKpiDrillHierarchy(phaseName, outerScope, outerScopeValue, stackChain) {
+function buildDetailKpiDrillHierarchy(phaseLabel, outerScope, outerScopeValue, stackChain) {
   if (!State.activeSnapshot) return null;
   const chainKey = (stackChain || []).map(s => `${s.levelKey}:${s.key}`).join(',');
-  const cacheKey = `${hierarchyCacheFingerprint()}|drill|ph:${phaseName || ''}|osc:${outerScope || ''}|osv:${outerScopeValue || ''}|chain:${chainKey}`;
+  // hierarchyCacheFingerprint() sudah memuat Global Scope (Phase + Regional) sehingga key ini otomatis unik per scope.
+  const cacheKey = `${hierarchyCacheFingerprint()}|drill|osc:${outerScope || ''}|osv:${outerScopeValue || ''}|chain:${chainKey}`;
   if (State.detailKpiHierarchyCache.has(cacheKey)) return State.detailKpiHierarchyCache.get(cacheKey);
-  const allRecords = Array.isArray(State.activeSnapshot.rawRecords) ? State.activeSnapshot.rawRecords : [];
-  let records = phaseName ? allRecords.filter(rec => String(rec.phaseProject || '').trim() === String(phaseName).trim()) : allRecords;
-  const activeStatuses = getActiveStatusSalesmanFilter();
-  records = records.filter(rec => activeStatuses.has(getEffectiveSalesmanStatus(rec)));
+  // Universe drill-down = Global Scope (Phase + Regional) + Status Salesman, memakai helper terpusat.
+  let records = getCalculationRecords(State.activeSnapshot);
   const outerPred = detailKpiPredicateForScope(outerScope, outerScopeValue);
   if (outerPred) records = records.filter(outerPred);
   // Rantai SEMUA seleksi drill-down (bukan hanya yang terakhir) - penting untuk alur ASS -> Depo -> Salesman
@@ -7208,7 +7720,7 @@ function buildDetailKpiDrillHierarchy(phaseName, outerScope, outerScopeValue, st
   });
   const validation = validateDataset(records);
   const hierarchy = buildHierarchy(validation, State.settings);
-  hierarchy.__phaseName = phaseName;
+  hierarchy.__phaseName = phaseLabel;
   return cachePutBounded(State.detailKpiHierarchyCache, cacheKey, hierarchy);
 }
 // Entitas basis-level (sesuai Level Detail KPI aktif) yang nilainya masuk bucket, dari SATU hierarchy yang
@@ -7226,7 +7738,7 @@ function detailKpiBucketEntitiesForHierarchy(hierarchy, basisLevel, kpiId, bucke
 // ============================================================
 function openDetailKpiBucketModal({ bucket, kpiId, kpiDef, basisLevel, scope, scopeValue, levelLabel, scopeLabel, bucketCount, totalValid }) {
   const valueLabel = detailKpiValueLabel(kpiId, kpiDef);
-  const activePhase = State.activePhaseFilter || null; // F: Phase aktif tetap diterapkan di belakang layar
+  const activePhase = globalPhaseFilterLabel(); // F: Global Filter tetap diterapkan di belakang layar (label saja)
   const hasMasterCabang = !!(State.masterCabang && State.masterCabang.byKodeDepo && State.masterCabang.byKodeDepo.size);
 
   // L3: Level Cabang tanpa Master Cabang -> empty state, jangan buat data Cabang palsu.
@@ -7261,7 +7773,7 @@ function openDetailKpiBucketModal({ bucket, kpiId, kpiDef, basisLevel, scope, sc
     const isEntry = depth === 0;
     let hierarchy;
     if (isEntry) {
-      hierarchy = buildDetailKpiScopedHierarchy(scope, scopeValue, activePhase);
+      hierarchy = buildDetailKpiScopedHierarchy(scope, scopeValue);
     } else {
       hierarchy = buildDetailKpiDrillHierarchy(activePhase, scope, scopeValue, stack);
     }
@@ -7713,7 +8225,7 @@ async function runDetailKpiExport(buildHtmlFn, filenameBase, triggerButton, load
 }
 // C1 — Download satu card distribusi: layout vertikal proporsional (~1400px lebar, tinggi menyesuaikan jumlah bucket).
 async function downloadDetailKpiCardJpg(kpiId, rows, levelLabel, scopeLabel, triggerButton) {
-  const phaseLabel = State.activePhaseFilter || 'Semua Phase';
+  const phaseLabel = globalScopeExportLabel();
   await runDetailKpiExport(() => `<div class="dkx-root dkx-root-card">
       ${detailKpiExportHeaderHtml('DISTRIBUSI KPI', levelLabel, scopeLabel, phaseLabel)}
       ${detailKpiExportCardHtml(kpiId, rows, levelLabel, { variant: 'single' })}
@@ -7721,7 +8233,7 @@ async function downloadDetailKpiCardJpg(kpiId, rows, levelLabel, scopeLabel, tri
 }
 // C2 — Download 7 summary card: layout grid 4 + 3 khusus export, tidak dipaksa satu baris.
 async function downloadDetailKpiSummaryJpg(contexts, levelLabel, scopeLabel, triggerButton) {
-  const phaseLabel = State.activePhaseFilter || 'Semua Phase';
+  const phaseLabel = globalScopeExportLabel();
   await runDetailKpiExport(() => `<div class="dkx-root dkx-root-summary">
       ${detailKpiExportHeaderHtml('RINGKASAN 7 KPI', levelLabel, scopeLabel, phaseLabel)}
       ${detailKpiExportSummaryGridHtml(contexts)}
@@ -7730,7 +8242,7 @@ async function downloadDetailKpiSummaryJpg(contexts, levelLabel, scopeLabel, tri
 // C3 — Download tampilan utama: laporan panjang ke bawah berisi ringkasan 7 KPI (4+3) dan distribusi 2 kolom
 // (Revenue selebar dua kolom di baris terakhir). Top10/Bottom10/Tabel Detail/kontrol website TIDAK disertakan.
 async function downloadDetailKpiMainJpg(contexts, levelLabel, scopeLabel, triggerButton) {
-  const phaseLabel = State.activePhaseFilter || 'Semua Phase';
+  const phaseLabel = globalScopeExportLabel();
   await runDetailKpiExport(() => `<div class="dkx-root dkx-root-main">
       ${detailKpiExportHeaderHtml('DETAIL KPI — TAMPILAN UTAMA', levelLabel, scopeLabel, phaseLabel)}
       <div class="dkx-section-title">Ringkasan 7 KPI</div>
@@ -7752,7 +8264,8 @@ function renderDetailKpiPage(params) {
     <label>Level:<select id="dk-level-select"><option value="salesman" ${level === 'salesman' ? 'selected' : ''}>Salesman</option><option value="ass" ${level === 'ass' ? 'selected' : ''}>ASS</option><option value="depo" ${level === 'depo' ? 'selected' : ''}>Depo</option><option value="cabang" ${level === 'cabang' ? 'selected' : ''} ${hasMasterCabangDk ? '' : 'disabled'} title="${hasMasterCabangDk ? '' : 'Unggah Master Cabang untuk menggunakan Level Cabang.'}">Cabang</option><option value="regional" ${level === 'regional' ? 'selected' : ''}>Regional</option></select></label>
     <label>Scope:<select id="dk-scope-select"><option value="nasional" ${scope === 'nasional' ? 'selected' : ''}>Nasional</option><option value="regional" ${scope === 'regional' ? 'selected' : ''}>Regional Tertentu</option><option value="cabang" ${scope === 'cabang' ? 'selected' : ''} ${hasMasterCabangDk ? '' : 'disabled'} title="${hasMasterCabangDk ? '' : 'Unggah Master Cabang untuk menggunakan Scope Cabang.'}">Cabang Tertentu</option><option value="depo" ${scope === 'depo' ? 'selected' : ''}>Depo Tertentu</option><option value="ass" ${scope === 'ass' ? 'selected' : ''}>ASS Tertentu</option></select></label>
     <div id="dk-scope-value-wrap"></div>
-    <label>Phase:<select id="dk-phase-select"><option value="">Semua Phase</option>${phaseOptions.map(phase => `<option value="${escapeHtml(phase)}" ${State.activePhaseFilter === phase ? 'selected' : ''}>${escapeHtml(phase)}</option>`).join('')}</select></label>
+    <label class="dk-global-filter-label">Phase:<button type="button" class="btn btn-outline btn-sm topbar-global-filter-btn" id="dk-phase-btn" aria-expanded="false" aria-haspopup="dialog" ${phaseOptions.length ? '' : 'disabled'}>${escapeHtml(globalPhaseFilterLabel())} ▾</button></label>
+    <label class="dk-global-filter-label">Regional:<button type="button" class="btn btn-outline btn-sm topbar-global-filter-btn" id="dk-region-btn" aria-expanded="false" aria-haspopup="dialog" ${getRegionOptions().length ? '' : 'disabled'}>${escapeHtml(globalRegionFilterLabel())} ▾</button></label>
   </div></div>`;
   const summaryTab = `<div id="dk-summary-export-root">
     <div class="detail-kpi-section-title"><div><h2>Ringkasan 7 KPI</h2><p>AVG, Median, Tertinggi, dan Terendah sesuai filter aktif.</p></div></div>
@@ -7783,7 +8296,10 @@ function wireDetailKpiPage(params) {
   document.querySelectorAll('[data-dk-tab]').forEach(button => button.addEventListener('click', () => navigate('/detail-kpi', navParams({ tab: button.dataset.dkTab }))));
   document.getElementById('dk-level-select').addEventListener('change', event => navigate('/detail-kpi', navParams({ level: event.target.value, value: '' })));
   document.getElementById('dk-scope-select').addEventListener('change', event => navigate('/detail-kpi', navParams({ scope: event.target.value, value: '' })));
-  document.getElementById('dk-phase-select').addEventListener('change', event => setActivePhaseFilter(event.target.value || null));
+  const dkPhaseBtn = document.getElementById('dk-phase-btn');
+  if (dkPhaseBtn && !dkPhaseBtn.disabled) dkPhaseBtn.addEventListener('click', event => { event.stopPropagation(); if (document.getElementById('topbar-global-multi-popover') && dkPhaseBtn.getAttribute('aria-expanded') === 'true') { closeGlobalMultiPopover(); return; } openGlobalPhaseFilterPopover(dkPhaseBtn); });
+  const dkRegionBtn = document.getElementById('dk-region-btn');
+  if (dkRegionBtn && !dkRegionBtn.disabled) dkRegionBtn.addEventListener('click', event => { event.stopPropagation(); if (document.getElementById('topbar-global-multi-popover') && dkRegionBtn.getAttribute('aria-expanded') === 'true') { closeGlobalMultiPopover(); return; } openGlobalRegionFilterPopover(dkRegionBtn); });
   const scopeWrap = document.getElementById('dk-scope-value-wrap');
   if (scope === 'regional') {
     const options = State.hierarchy.byRegion.map(row => row.meta.region).sort();
@@ -8611,31 +9127,79 @@ function wirePengaturanPage() {
 /* ============================================================
    INITIALIZATION
    ============================================================ */
-// ===== Filter Global Phase Project =====
-// State.activePhaseFilter === null berarti "Semua Phase" (perilaku identik dengan sebelum fitur ini ada).
-// Filter ini TIDAK menyentuh Data Sumber Excel (viewer selalu pakai snapshot.rawRecords utuh).
+// ===== GLOBAL FILTER: Phase Project & Regional (keduanya multi-select) =====
+// Set kosong === "Semua" pada dimensi tersebut (perilaku identik dengan sebelum fitur ini ada).
+// Filter ini TIDAK menyentuh Data Sumber Excel (viewer selalu pakai snapshot.rawRecords utuh)
+// dan TIDAK PERNAH ikut dipublikasikan sebagai business data.
 function getPhaseOptions() {
   if (!State.activeSnapshot) return [];
   const set = new Set();
-  State.activeSnapshot.rawRecords.forEach(r => { const v = String(r.phaseProject || '').trim(); if (v) set.add(v); });
-  return Array.from(set).sort((a, b) => a.localeCompare(b, 'id'));
+  (State.activeSnapshot.rawRecords || []).forEach(r => { const v = phaseValueOfRecord(r); if (v) set.add(v); });
+  return Array.from(set).sort((a, b) => a.localeCompare(b, 'id', { numeric: true }));
+}
+function getRegionOptions() {
+  if (!State.activeSnapshot) return [];
+  const set = new Set();
+  (State.activeSnapshot.rawRecords || []).forEach(r => { const v = regionValueOfRecord(r); if (v) set.add(v); });
+  return Array.from(set).sort((a, b) => a.localeCompare(b, 'id', { numeric: true }));
 }
 function getPhaseFilteredRawRecords(snapshot) {
   return getCalculationRecords(snapshot);
 }
-async function setActivePhaseFilter(phase) {
-  State.activePhaseFilter = phase || null;
+// Label ringkas untuk topbar: "Semua", nama tunggal, atau "N Dipilih".
+function multiFilterShortLabel(selectedSet, allLabel) {
+  const values = Array.from(selectedSet || []);
+  if (!values.length) return allLabel;
+  if (values.length === 1) return values[0];
+  return `${values.length} Dipilih`;
+}
+function globalPhaseFilterLabel() { return multiFilterShortLabel(State.activePhaseFilters, 'Semua Phase'); }
+function globalRegionFilterLabel() { return multiFilterShortLabel(State.activeRegionFilters, 'Semua Regional'); }
+// Daftar lengkap (urut stabil) untuk metadata CSV / subtitle JPG.
+function globalPhaseFilterValues() { return getPhaseOptions().filter(v => State.activePhaseFilters.has(v)); }
+function globalRegionFilterValues() { return getRegionOptions().filter(v => State.activeRegionFilters.has(v)); }
+// Chip filter summary JPG (dan tempat lain) — hanya muncul bila dimensinya memang dibatasi.
+function globalScopeSummaryChips() {
+  const chips = [];
+  if (State.activePhaseFilters.size) chips.push(`Phase: ${globalPhaseFilterValues().join(', ')}`);
+  if (State.activeRegionFilters.size) chips.push(`Regional: ${globalRegionFilterValues().join(', ')}`);
+  return chips;
+}
+// Alias historis agar seluruh jpgFilterSummary lama ikut membawa Phase + Regional.
+function phaseSummaryChip() { return globalScopeSummaryChips(); }
+function globalScopeCsvMetadataRows() {
+  return [
+    ['Phase', State.activePhaseFilters.size ? globalPhaseFilterValues().join('; ') : 'Semua'],
+    ['Regional', State.activeRegionFilters.size ? globalRegionFilterValues().join('; ') : 'Semua']
+  ];
+}
+// Label gabungan untuk header export Detail KPI (satu baris).
+function globalScopeExportLabel() {
+  return `${globalPhaseFilterLabel()} • ${globalRegionFilterLabel()}`;
+}
+// Saat snapshot berganti: pilihan yang masih ada dipertahankan, yang hilang dibuang.
+// Bila seluruh pilihan hilang, Set menjadi kosong = "Semua" (tidak pernah menghasilkan halaman kosong).
+function reconcileGlobalScopeFilters() {
+  const phases = new Set(getPhaseOptions());
+  const regions = new Set(getRegionOptions());
+  State.activePhaseFilters = new Set(Array.from(State.activePhaseFilters).filter(v => phases.has(v)));
+  State.activeRegionFilters = new Set(Array.from(State.activeRegionFilters).filter(v => regions.has(v)));
+}
+function recomputeAfterGlobalScopeChange() {
   State.vacantSelection.clear();
+  invalidateGlobalScopeCaches();
   if (State.activeSnapshot) {
-    State.validation = validateDataset(getPhaseFilteredRawRecords(State.activeSnapshot));
-    State.rankingCache.clear();
+    State.validation = validateDataset(getCalculationRecords(State.activeSnapshot));
     State.hierarchy = getHierarchyCached(State.validation, State.settings);
     rebuildComparisonContext();
   }
-  router();
 }
-function phaseSummaryChip() {
-  return State.activePhaseFilter ? [`Phase: ${State.activePhaseFilter}`] : [];
+// Titik masuk TUNGGAL perubahan Global Filter (dipakai popover Phase & Regional).
+async function applyGlobalScopeFilters({ phases, regions }) {
+  if (phases) State.activePhaseFilters = new Set(getPhaseOptions().filter(v => phases.includes(v)));
+  if (regions) State.activeRegionFilters = new Set(getRegionOptions().filter(v => regions.includes(v)));
+  recomputeAfterGlobalScopeChange();
+  router();
 }
 
 // Snapshot Hit Rate lama dibedakan dari formula aktif TOTAL CALL ESUITE.
@@ -8661,7 +9225,8 @@ async function loadSnapshotIntoState(snapshot) {
   Object.values(State.rankingHeaderFilters).forEach(filters => Object.keys(filters).forEach(key => delete filters[key]));
   if (!snapshot) {
     State.activeSnapshot = null;
-    State.activePhaseFilter = null;
+    State.activePhaseFilters = new Set();
+    State.activeRegionFilters = new Set();
     State.isLegacyHitRateSnapshot = false;
     State.isLegacyTatSnapshot = false;
     State.validation = null;
@@ -8671,7 +9236,9 @@ async function loadSnapshotIntoState(snapshot) {
     return;
   }
   State.activeSnapshot = snapshot;
-  State.activePhaseFilter = null;
+  // Snapshot berganti: pilihan Global Filter yang masih ada dipertahankan, yang tidak ada dibuang.
+  reconcileGlobalScopeFilters();
+  invalidateGlobalScopeCaches();
   State.isLegacyHitRateSnapshot = isLegacyHitRateSnapshot(snapshot);
   State.isLegacyTatSnapshot = isLegacyTatSnapshot(snapshot);
   State.validation = validateDataset(getPhaseFilteredRawRecords(snapshot));
