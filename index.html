@@ -16,6 +16,14 @@
    (latar krem terang, pill nav navy, badge hijau, kartu putih)
    ===================================================== */
 :root{
+  /* ===== Geometry header tabel Ranking (satu sumber kebenaran) =====
+     Lebar kolom KPI seragam; nilai JS RANKING_KPI_COLUMN_WIDTH harus sama dengan angka ini. */
+  --ranking-kpi-column-width:104px;
+  --ranking-group-header-height:38px;
+  --ranking-subheader-height:46px;
+  --ranking-header-total-height:84px; /* group + subheader, disamakan dengan header standalone */
+  --dt-header-gap:4px;      /* jarak label-unit <-> tombol filter */
+  --dt-header-sort-gap:3px; /* jarak label <-> icon sort */
   --bg:#f6f4ef;
   --bg-soft:#efece3;
   --card:#ffffff;
@@ -175,18 +183,22 @@ body{margin:0;font-family:var(--font);background:var(--bg);color:var(--ink);min-
 .countif-threshold-input{height:32px;width:74px;padding:3px 6px;font-size:11.5px;border-radius:8px;border:1px solid var(--card-border);background:#fff;color:var(--ink);text-align:center;font-family:inherit;}
 .countif-threshold-input.is-money{width:96px;}
 /* ===== Sorting header KPI numerik & tombol Hapus Sort ===== */
-.dt-header-sortable{cursor:pointer;display:inline-flex;align-items:center;gap:3px;user-select:none;}
+.dt-header-sortable{cursor:pointer;display:inline-flex;align-items:center;gap:0;user-select:none;}
+.dt-header-sortable:hover .dt-sort-icon,.dt-header-static .dt-sort-icon.is-active{margin-left:var(--dt-header-sort-gap);}
 .dt-header-sortable:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:4px;}
-.dt-sort-icon{opacity:0;font-size:10px;line-height:1;transition:opacity .15s;}
-.dt-header-sortable:hover .dt-sort-icon{opacity:.55;}
-.dt-sort-icon.is-active{opacity:1;color:var(--navy);font-weight:900;}
+/* Icon sort TIDAK memesan ruang saat tidak aktif, sehingga label & tombol filter benar-benar rapat.
+   Lebar kolom sudah fixed (colgroup + table-layout:fixed), jadi memunculkan icon saat hover/aktif
+   hanya menata ulang isi TH tersebut — tidak pernah menggeser layout tabel. */
+.dt-sort-icon{opacity:0;font-size:9px;line-height:1;width:0;min-width:0;overflow:hidden;text-align:center;transition:opacity .15s;}
+.dt-header-sortable:hover .dt-sort-icon{opacity:.55;width:8px;min-width:8px;}
+.dt-sort-icon.is-active{opacity:1;width:8px;min-width:8px;color:var(--navy);font-weight:900;}
 .dt-clear-sort-btn{border:1px solid var(--navy);background:#fff;color:var(--navy);padding:5px 10px;border-radius:999px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap;transition:.15s;}
 .dt-clear-sort-btn:hover{background:var(--bg-soft);}
 @media (max-width:1100px){
   .dt-ranking-toolbar-row{flex-wrap:wrap;}
   .dt-countif-toolbar{width:100%;justify-content:flex-end;overflow-x:auto;padding-bottom:2px;}
 }
-.dt-header-static{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:0;color:inherit;font:inherit;text-transform:inherit;letter-spacing:inherit;}
+.dt-header-static{display:inline-flex;align-items:center;justify-content:center;gap:0;min-width:0;color:inherit;font:inherit;text-transform:inherit;letter-spacing:inherit;}
 .jpg-delta{display:block;margin-top:2px;font-size:10px;font-weight:800;line-height:1.1;}
 .app-root{flex:1;padding:22px 26px 60px;overflow-x:hidden;}
 
@@ -505,12 +517,12 @@ select:focus,input:focus{outline:2px solid var(--gold);outline-offset:1px;}
 /* ===== Header dua tingkat untuk seluruh tabel Ranking ===== */
 .dt-table.has-grouped-header{border-collapse:separate;border-spacing:0;}
 .dt-table.has-grouped-header thead tr.dt-group-header-row th{
-  position:sticky;top:0;z-index:7;height:40px;padding:9px 10px;
+  position:sticky;top:0;z-index:7;height:var(--ranking-group-header-height);padding:9px 8px;
   color:#fff;border-right:1px solid rgba(255,255,255,.28);border-bottom:1px solid rgba(255,255,255,.34);
   text-align:center;vertical-align:middle;font-size:10.5px;font-weight:850;text-transform:uppercase;letter-spacing:.35px;
 }
 .dt-table.has-grouped-header thead tr.dt-subheader-row th{
-  position:sticky;top:40px;z-index:6;height:44px;padding:9px 10px;
+  position:sticky;top:var(--ranking-group-header-height);z-index:6;height:var(--ranking-subheader-height);padding:7px 5px;
   background:#f6f4ef;color:var(--navy);border-right:1px solid var(--card-border);border-bottom:2px solid var(--card-border);
   text-align:center;vertical-align:middle;font-size:10px;font-weight:850;text-transform:uppercase;letter-spacing:.25px;white-space:nowrap;
 }
@@ -521,11 +533,12 @@ select:focus,input:focus{outline:2px solid var(--gold);outline-offset:1px;}
 .dt-ranking-standalone.dt-grp-result{background:#1f2937 !important;color:#fff !important;}
 .dt-table.has-grouped-header thead th.dt-sticky-column{z-index:30 !important;}
 .dt-table.has-grouped-header thead tr.dt-group-header-row th.dt-ranking-standalone.dt-sticky-column{
-  top:0;z-index:32 !important;height:84px;min-height:84px;background:#1f2937 !important;color:#fff !important;
+  top:0;z-index:32 !important;height:var(--ranking-header-total-height);min-height:var(--ranking-header-total-height);background:#1f2937 !important;color:#fff !important;
 }
 .dt-table.has-grouped-header thead tr.dt-subheader-row th.dt-sticky-column{z-index:29 !important;}
 .dt-table.has-grouped-header thead tr.dt-group-header-row th.dt-sticky-column:nth-child(2),
-.dt-table.has-grouped-header tbody td.dt-sticky-column:nth-child(2){box-shadow:6px 0 9px -8px rgba(31,41,55,.78);}
+.dt-table.has-grouped-header thead tr.dt-subheader-row th.dt-sticky-column:nth-child(2),
+.dt-table.has-grouped-header tbody td.dt-sticky-column:nth-child(2){box-shadow:4px 0 6px -6px rgba(31,41,55,.45);}
 .dt-table.has-grouped-header{table-layout:fixed;}
 .detail-kpi-chart-wrap canvas{cursor:pointer;}
 .dt-table.has-grouped-header .dt-ranking-standalone .dt-header-filter-toggle{color:rgba(255,255,255,.76);}
@@ -558,12 +571,17 @@ select:focus,input:focus{outline:2px solid var(--gold);outline-offset:1px;}
 .skeleton{background:linear-gradient(90deg,var(--bg-soft) 25%,#f8f7f3 37%,var(--bg-soft) 63%);background-size:400% 100%;animation:skeleton-loading 1.4s ease infinite;border-radius:6px;height:14px;}
 
 /* ===== Header satu baris: area sort + tombol filter (Ranking Salesman) ===== */
-.dt-header-content{display:flex;align-items:center;justify-content:center;gap:4px;width:100%;white-space:nowrap;}
+/* Label + (sort) + filter diperlakukan sebagai SATU unit inline yang di-center di dalam TH.
+   Sengaja TIDAK memakai width:100% + space-between agar icon tidak terlempar ke tepi kolom. */
+.dt-header-content{display:inline-flex;align-items:center;justify-content:center;gap:var(--dt-header-gap);width:auto;max-width:100%;white-space:nowrap;vertical-align:middle;}
 .dt-header-label{text-align:center;}
-.dt-header-filter-toggle{display:inline-flex;align-items:center;justify-content:center;width:22px;min-width:22px;height:22px;padding:0;border:none;border-radius:5px;background:transparent;color:var(--ink-soft);cursor:pointer;font-size:11px;}
+.dt-header-filter-toggle{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:20px;min-width:20px;height:20px;padding:0;margin:0;border:none;border-radius:5px;background:transparent;color:var(--ink-soft);cursor:pointer;font-size:11px;}
 .dt-header-filter-toggle:hover{background:rgba(31,41,55,0.08);color:var(--navy);}
 .dt-header-filter-toggle.is-active{color:#1f2937;background:#e6f0fb;box-shadow:inset 0 0 0 1px #8fb8e3;}
-.dt-header-filter-toggle svg{width:13px;height:13px;display:block;pointer-events:none;}
+.dt-header-filter-toggle svg{width:12.5px;height:12.5px;display:block;pointer-events:none;}
+/* Label multi-baris KHUSUS (saat ini hanya EC VS CALL TOTAL). Label lain tetap satu baris. */
+.dt-header-multiline{display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.12;text-align:center;font-size:9.5px;letter-spacing:.15px;}
+.dt-header-multiline > span{white-space:nowrap;display:block;}
 
 /* ===== Popover Filter (append ke body, tidak terpotong overflow tabel) ===== */
 .dt-filter-popover{position:fixed;width:260px;max-height:360px;display:flex;flex-direction:column;background:#ffffff;border:1px solid var(--card-border);border-radius:10px;box-shadow:var(--shadow-md);padding:10px;z-index:2500;color:var(--ink);text-align:left;}
@@ -1101,7 +1119,8 @@ select:focus,input:focus{outline:2px solid var(--gold);outline-offset:1px;}
 @media (max-width:700px){.vacant-salesman-head,.vacant-selection-toolbar{align-items:flex-start;flex-direction:column;}.vacant-modal-actions input[type=search]{min-width:100%;}.vacant-selection-actions{width:100%;flex-wrap:wrap;}}
 
 
-.dt-table.has-grouped-header th.dt-sticky-end,.dt-table.has-grouped-header td.dt-sticky-end{box-shadow:6px 0 9px -8px rgba(31,41,55,.78)!important;}
+/* Separator sticky: garis bayangan tipis saja, bukan layer tebal yang menutupi header KPI. */
+.dt-table.has-grouped-header th.dt-sticky-end,.dt-table.has-grouped-header td.dt-sticky-end{box-shadow:4px 0 6px -6px rgba(31,41,55,.45)!important;}
 
 .runtime-badge{display:inline-flex;align-items:center;gap:6px;height:29px;padding:0 10px;border-radius:16px;font-size:11px;font-weight:800;white-space:nowrap;border:1px solid var(--card-border);}
 .runtime-badge.viewer{background:#eef6ff;color:#245a94;border-color:#c9dff3;}
@@ -5974,17 +5993,36 @@ function rankingTatAchievement(row, kpiId) {
   const value = Number(row.kpi[kpiId].scoreBasis);
   return Number.isFinite(value) ? value : null;
 }
-function rankingTatColumn(key, kpiId, groupKey, groupLabel, groupClass, width = 80) {
+function rankingTatColumn(key, kpiId, groupKey, groupLabel, groupClass, width = RANKING_KPI_COLUMN_WIDTH) {
   return { key, label: '%TAT', groupKey, groupLabel, groupClass, align: 'center', sortable: false, width,
     render: row => fmtPercent(rankingTatAchievement(row, kpiId)),
     csvValue: row => rankingTatAchievement(row, kpiId),
     jpgValue: row => fmtPercent(rankingTatAchievement(row, kpiId)) };
 }
+/* ------------------------------------------------------------
+   GEOMETRY HEADER RANKING
+   Satu sumber kebenaran lebar kolom KPI (harus sama dengan --ranking-kpi-column-width di CSS).
+   Dipakai oleh <colgroup>, style TH, dan floating header (yang meng-clone keduanya),
+   sehingga seluruh metric column pada Viewer maupun Admin punya lebar identik.
+   ------------------------------------------------------------ */
+const RANKING_KPI_COLUMN_WIDTH = 104;
+/**
+ * Presentasi header dua baris KHUSUS. Label data (c.label) TETAP "EC VS CALL TOTAL" satu baris,
+ * sehingga CSV, JPG, Countif, filter, dan aria-label tidak ikut berubah — hanya markup header web.
+ */
+const RANKING_MULTILINE_HEADER_LABELS = { 'EC VS CALL TOTAL': ['EC VS', 'CALL TOTAL'] };
+function rankingHeaderLabelHtml(label) {
+  const lines = RANKING_MULTILINE_HEADER_LABELS[String(label || '').trim()];
+  if (!lines) return escapeHtml(label);
+  // Tiap baris dibungkus span nowrap -> jumlah baris PERSIS sesuai definisi (tidak pernah pecah jadi 3 baris).
+  return `<span class="dt-header-multiline">${lines.map(line => `<span>${escapeHtml(line)}</span>`).join('')}</span>`;
+}
 function rankingPercentColumn(key, label, groupKey, groupLabel, groupClass, kpiId, options = {}) {
   return {
     key, label, groupKey, groupLabel, groupClass, align: 'center',
     sortable: !!options.sortId, sortId: options.sortId || undefined,
-    width: options.width || 92,
+    width: options.width || RANKING_KPI_COLUMN_WIDTH,
+    headerHtml: rankingHeaderLabelHtml(label),
     render: row => fmtPercent(rankingKpiActual(row, kpiId)),
     csvValue: row => rankingKpiActual(row, kpiId),
     jpgValue: row => fmtPercent(rankingKpiActual(row, kpiId)),
@@ -6140,45 +6178,45 @@ function rankingColumns(opts) {
   // Header dua tingkat. Golden EC tetap dihitung dalam sistem dan tetap tersedia di CSV,
   // tetapi disembunyikan dari tabel web/JPG agar tabel lebih ramping.
   cols.push(
-    rankingPercentColumn('kpi.scJks.actual', 'SC/JKS', 'process', 'Proses Kerja', 'dt-grp-process', 'scJks', { width: 92, sortId: 'scJks' }),
-    rankingPercentColumn('kpi.geofencing.actual', 'GEO', 'process', 'Proses Kerja', 'dt-grp-process', 'geofencing', { width: 86, sortId: 'geofencing' }),
+    rankingPercentColumn('kpi.scJks.actual', 'SC/JKS', 'process', 'Proses Kerja', 'dt-grp-process', 'scJks', { sortId: 'scJks' }),
+    rankingPercentColumn('kpi.geofencing.actual', 'GEO', 'process', 'Proses Kerja', 'dt-grp-process', 'geofencing', { sortId: 'geofencing' }),
     {
-      key: 'support.avgEc', label: 'AVG EC', groupKey: 'productivity', groupLabel: 'Productivity', groupClass: 'dt-grp-productivity', align: 'center', sortable: true, sortId: 'avgEc', width: 82,
+      key: 'support.avgEc', label: 'AVG EC', groupKey: 'productivity', groupLabel: 'Productivity', groupClass: 'dt-grp-productivity', align: 'center', sortable: true, sortId: 'avgEc', width: RANKING_KPI_COLUMN_WIDTH,
       render: row => { const value = rankingAverageEc(row); return value === null ? '-' : fmtNumber(value, 0); },
       csvValue: row => rankingAverageEc(row),
       jpgValue: row => { const value = rankingAverageEc(row); return value === null ? '-' : fmtNumber(value, 0); }
     },
-    rankingPercentColumn('kpi.avgEcAch.actual', 'Golden EC', 'productivity', 'Productivity', 'dt-grp-productivity', 'avgEcAch', { csvOnly: true, excludeFromJpg: true }),
-    { key: 'support.tgtRoa', label: 'TGT ROA', groupKey: 'productivity', groupLabel: 'Productivity', groupClass: 'dt-grp-productivity', align: 'center', sortable: false, width: 90,
+    rankingPercentColumn('kpi.avgEcAch.actual', 'Golden EC', 'productivity', 'Productivity', 'dt-grp-productivity', 'avgEcAch', { csvOnly: true, excludeFromJpg: true, width: RANKING_KPI_COLUMN_WIDTH }),
+    { key: 'support.tgtRoa', label: 'TGT ROA', groupKey: 'productivity', groupLabel: 'Productivity', groupClass: 'dt-grp-productivity', align: 'center', sortable: false, width: RANKING_KPI_COLUMN_WIDTH,
       render: row => fmtNumber(rankingRoaTarget(row), 0), csvValue: row => rankingRoaTarget(row), jpgValue: row => fmtNumber(rankingRoaTarget(row), 0) },
-    { key: 'support.roa', label: 'ROA', groupKey: 'productivity', groupLabel: 'Productivity', groupClass: 'dt-grp-productivity', align: 'center', sortable: false, width: 86,
+    { key: 'support.roa', label: 'ROA', groupKey: 'productivity', groupLabel: 'Productivity', groupClass: 'dt-grp-productivity', align: 'center', sortable: false, width: RANKING_KPI_COLUMN_WIDTH,
       render: row => fmtNumber(rankingRoaActual(row), 0), csvValue: row => rankingRoaActual(row), jpgValue: row => fmtNumber(rankingRoaActual(row), 0) },
-    rankingPercentColumn('kpi.roaCb.actual', '%ROA', 'productivity', 'Productivity', 'dt-grp-productivity', 'roaCb', { width: 86, sortId: 'roaCb' }),
+    rankingPercentColumn('kpi.roaCb.actual', '%ROA', 'productivity', 'Productivity', 'dt-grp-productivity', 'roaCb', { sortId: 'roaCb' }),
     rankingTatColumn('support.tatRoa', 'roaCb', 'productivity', 'Productivity', 'dt-grp-productivity'),
-    rankingPercentColumn('kpi.hitRate.actual', 'EC VS CALL TOTAL', 'productivity', 'Productivity', 'dt-grp-productivity', 'hitRate', { width: 120, sortId: 'hitRate' }),
+    rankingPercentColumn('kpi.hitRate.actual', 'EC VS CALL TOTAL', 'productivity', 'Productivity', 'dt-grp-productivity', 'hitRate', { sortId: 'hitRate' }),
     {
-      key: 'revenueNominal.target', label: 'TGT OMZ', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'tgtOmz', width: 104,
+      key: 'revenueNominal.target', label: 'TGT OMZ', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'tgtOmz', width: RANKING_KPI_COLUMN_WIDTH,
       render: row => rankingCompactMoneyHtml(rankingRevenueNominalTarget(row)),
       csvValue: row => rankingRevenueNominalTarget(row),
       jpgValue: row => fmtRupiahCompact(rankingRevenueNominalTarget(row))
     },
     {
-      key: 'revenueNominal.actual', label: 'OMZET', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'omzet', width: 104,
+      key: 'revenueNominal.actual', label: 'OMZET', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'omzet', width: RANKING_KPI_COLUMN_WIDTH,
       render: row => rankingCompactMoneyHtml(rankingRevenueNominalActual(row)),
       csvValue: row => rankingRevenueNominalActual(row),
       jpgValue: row => fmtRupiahCompact(rankingRevenueNominalActual(row))
     },
-    rankingPercentColumn('kpi.revenue.actual', '% OMZ', 'revenue', 'Revenue Total', 'dt-grp-revenue', 'revenue', { width: 84, sortId: 'pctOmz' }),
+    rankingPercentColumn('kpi.revenue.actual', '% OMZ', 'revenue', 'Revenue Total', 'dt-grp-revenue', 'revenue', { sortId: 'pctOmz' }),
     rankingTatColumn('support.tatRevenue', 'revenue', 'revenue', 'Revenue Total', 'dt-grp-revenue'),
     {
-      key: 'support.tgtEpb2', label: 'TGT EPB2', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'tgtEpb2', width: 88,
+      key: 'support.tgtEpb2', label: 'TGT EPB2', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'tgtEpb2', width: RANKING_KPI_COLUMN_WIDTH,
       render: row => fmtNumber(rankingEpbTarget(row), 0), csvValue: row => rankingEpbTarget(row), jpgValue: row => fmtNumber(rankingEpbTarget(row), 0)
     },
     {
-      key: 'support.epb2', label: 'EPB2', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'epb2', width: 80,
+      key: 'support.epb2', label: 'EPB2', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'epb2', width: RANKING_KPI_COLUMN_WIDTH,
       render: row => fmtNumber(rankingEpbActual(row), 0), csvValue: row => rankingEpbActual(row), jpgValue: row => fmtNumber(rankingEpbActual(row), 0)
     },
-    rankingPercentColumn('kpi.strata2.actual', '% EPB2', 'revenue', 'Revenue Total', 'dt-grp-revenue', 'strata2', { width: 86, sortId: 'pctEpb2' }),
+    rankingPercentColumn('kpi.strata2.actual', '% EPB2', 'revenue', 'Revenue Total', 'dt-grp-revenue', 'strata2', { sortId: 'pctEpb2' }),
     rankingTatColumn('support.tatEpb2', 'strata2', 'revenue', 'Revenue Total', 'dt-grp-revenue'),
     { key: 'finalScore', label: 'Final Score', align: 'center', sortable: true, sortId: 'finalScore', headerBand: 'result', width: 104,
       render: r => `<strong>${fmtNumber(r.finalScore, 2)}</strong>`, csvValue: r => r.finalScore, jpgValue: r => fmtNumber(r.finalScore, 2) },
