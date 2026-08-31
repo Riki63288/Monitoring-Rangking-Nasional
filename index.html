@@ -3352,7 +3352,7 @@ class DataTable {
         <button class="btn btn-sm btn-outline dt-export">⬇ Export CSV</button>
         ${this.jpgEnabled ? `<button class="btn btn-sm btn-outline dt-jpg" aria-label="Download tabel sebagai JPG" ${this._jpgBusy ? 'disabled' : ''}>${this._jpgBusy ? 'Menyiapkan JPG...' : '🖼 Download JPG'}</button>` : ''}
       </div>
-      ${this.isRankingTable ? tatTodayInfoHtml() : ''}`;
+      `; /* Info "TAT Hari Ini" sengaja TIDAK dirender pada Ranking — TAT kini faktor internal. */
 
     const scrollWrap = document.createElement('div'); scrollWrap.className = `dt-scroll${view.hasGroupedHeader ? ' dt-scroll-sticky' : ''}${this.mainRankingScroll ? ' dt-ranking-main-scroll' : ''}`;
     const table = document.createElement('table');
@@ -3360,8 +3360,12 @@ class DataTable {
     let colgroupEl = null;
     if (view.hasGroupedHeader) {
       const totalTableWidth = view.visibleColumns.reduce((sum, column) => sum + (Number(column.width) || 105), 0);
-      table.style.width = `${Math.max(1280, totalTableWidth)}px`;
-      table.style.minWidth = `${Math.max(1280, totalTableWidth)}px`;
+      // Lebar tabel = JUMLAH PERSIS lebar kolom. Sebelumnya ada lantai 1280px; setelah kolom %TAT
+      // dihapus, jumlah kolom Viewer bisa lebih sempit dari lantai itu sehingga table-layout:fixed
+      // membagikan sisa ruang dan kolom KPI melar (104px -> 105px). Memakai lebar persis membuat
+      // seluruh kolom KPI tetap tepat RANKING_KPI_COLUMN_WIDTH pada Viewer maupun Admin.
+      table.style.width = `${totalTableWidth}px`;
+      table.style.minWidth = `${totalTableWidth}px`;
       table.style.tableLayout = 'fixed';
       colgroupEl = document.createElement('colgroup');
       view.visibleColumns.forEach(column => {
@@ -3718,7 +3722,7 @@ class DataTable {
     const headers = exportColumns.map(c => c.label);
     const rows = this.getFiltered().map(r => exportColumns.map(c => (c.csvValue ? c.csvValue(r) : c.render(r).replace(/<[^>]+>/g, ''))));
     const metadata = [...statusSalesmanCsvMetadataRows()];
-    if (this.isRankingTable) { const tatText = tatTodayLabelText(); if (tatText) metadata.push(['TAT Hari Ini', tatText.replace('TAT Hari Ini: ', '')]); }
+    // Metadata "TAT Hari Ini" sengaja TIDAK disertakan pada CSV Ranking.
     if (typeof this.jpgFilterSummary === 'function') {
       this.jpgFilterSummary().forEach(chip => {
         const idx = String(chip).indexOf(':');
@@ -4122,8 +4126,7 @@ class DataTable {
       const baseFilterSummary = typeof this.jpgFilterSummary === 'function' ? this.jpgFilterSummary() : this.jpgFilterSummary;
       const quickLabels = { bottom3: 'Bottom 3', critical: 'Critical', need: 'Need Improvement', goodplus: 'Good+' };
       const filterSummary = [...(baseFilterSummary || [])];
-      // Informasi TAT global juga dibawa ke JPG Ranking (kolom %TAT tetap per entitas).
-      if (this.isRankingTable) { const tatText = tatTodayLabelText(); if (tatText) filterSummary.push(tatText); }
+      // Chip "TAT Hari Ini" sengaja TIDAK disertakan pada JPG Ranking.
       if (this.quickStatusEnabled && this.quickStatusFilter !== 'all') filterSummary.push(`Status: ${quickLabels[this.quickStatusFilter] || this.quickStatusFilter}`);
       if (this.countifEnabled && (this.countifActiveFilter === 'gte' || this.countifActiveFilter === 'lt')) {
         const countifThreshold = this.getCountifThresholdValue();
@@ -4861,7 +4864,7 @@ function publicDataBannerHtml() {
 }
 function tatLegacyBannerHtml() {
   if (!State.activeSnapshot || !State.isLegacyTatSnapshot) return '';
-  return `<div class="alert alert-warn"><strong>Snapshot formula lama.</strong> Data ini belum memiliki TAT MTD yang tervalidasi. Kolom %TAT ditampilkan "-" dan score tetap memakai formula lama. Upload serta publikasikan file terbaru agar ranking memakai perhitungan berbasis TAT.</div>`;
+  return `<div class="alert alert-warn"><strong>Snapshot formula lama.</strong> Score masih memakai formula lama. Upload serta publikasikan file terbaru agar ranking memakai formula scoring terbaru.</div>`;
 }
 async function refreshViewerData() {
   if (State.runtimeMode !== 'viewer') return;
@@ -5993,6 +5996,10 @@ function rankingTatAchievement(row, kpiId) {
   const value = Number(row.kpi[kpiId].scoreBasis);
   return Number.isFinite(value) ? value : null;
 }
+/* CATATAN: sejak TAT diperlakukan sebagai FAKTOR PERHITUNGAN INTERNAL (bukan metrik
+   user-facing), builder kolom ini TIDAK LAGI dipanggil oleh rankingColumns(). Fungsi dan
+   rankingTatAchievement() sengaja DIPERTAHANKAN agar engine/score dan pemanggil internal
+   lain tidak terganggu, serta agar kolom ini mudah diaktifkan kembali bila dibutuhkan. */
 function rankingTatColumn(key, kpiId, groupKey, groupLabel, groupClass, width = RANKING_KPI_COLUMN_WIDTH) {
   return { key, label: '%TAT', groupKey, groupLabel, groupClass, align: 'center', sortable: false, width,
     render: row => fmtPercent(rankingTatAchievement(row, kpiId)),
@@ -6192,7 +6199,6 @@ function rankingColumns(opts) {
     { key: 'support.roa', label: 'ROA', groupKey: 'productivity', groupLabel: 'Productivity', groupClass: 'dt-grp-productivity', align: 'center', sortable: false, width: RANKING_KPI_COLUMN_WIDTH,
       render: row => fmtNumber(rankingRoaActual(row), 0), csvValue: row => rankingRoaActual(row), jpgValue: row => fmtNumber(rankingRoaActual(row), 0) },
     rankingPercentColumn('kpi.roaCb.actual', '%ROA', 'productivity', 'Productivity', 'dt-grp-productivity', 'roaCb', { sortId: 'roaCb' }),
-    rankingTatColumn('support.tatRoa', 'roaCb', 'productivity', 'Productivity', 'dt-grp-productivity'),
     rankingPercentColumn('kpi.hitRate.actual', 'EC VS CALL TOTAL', 'productivity', 'Productivity', 'dt-grp-productivity', 'hitRate', { sortId: 'hitRate' }),
     {
       key: 'revenueNominal.target', label: 'TGT OMZ', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'tgtOmz', width: RANKING_KPI_COLUMN_WIDTH,
@@ -6207,7 +6213,6 @@ function rankingColumns(opts) {
       jpgValue: row => fmtRupiahCompact(rankingRevenueNominalActual(row))
     },
     rankingPercentColumn('kpi.revenue.actual', '% OMZ', 'revenue', 'Revenue Total', 'dt-grp-revenue', 'revenue', { sortId: 'pctOmz' }),
-    rankingTatColumn('support.tatRevenue', 'revenue', 'revenue', 'Revenue Total', 'dt-grp-revenue'),
     {
       key: 'support.tgtEpb2', label: 'TGT EPB2', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'tgtEpb2', width: RANKING_KPI_COLUMN_WIDTH,
       render: row => fmtNumber(rankingEpbTarget(row), 0), csvValue: row => rankingEpbTarget(row), jpgValue: row => fmtNumber(rankingEpbTarget(row), 0)
@@ -6217,7 +6222,6 @@ function rankingColumns(opts) {
       render: row => fmtNumber(rankingEpbActual(row), 0), csvValue: row => rankingEpbActual(row), jpgValue: row => fmtNumber(rankingEpbActual(row), 0)
     },
     rankingPercentColumn('kpi.strata2.actual', '% EPB2', 'revenue', 'Revenue Total', 'dt-grp-revenue', 'strata2', { sortId: 'pctEpb2' }),
-    rankingTatColumn('support.tatEpb2', 'strata2', 'revenue', 'Revenue Total', 'dt-grp-revenue'),
     { key: 'finalScore', label: 'Final Score', align: 'center', sortable: true, sortId: 'finalScore', headerBand: 'result', width: 104,
       render: r => `<strong>${fmtNumber(r.finalScore, 2)}</strong>`, csvValue: r => r.finalScore, jpgValue: r => fmtNumber(r.finalScore, 2) },
     { key: 'category.label', label: 'Kategori', align: 'center', sortable: false, headerBand: 'result', width: 128,
@@ -6829,15 +6833,24 @@ function wireRankingSalesmanPage(params) {
 function salesmanDetailProductivityFacts(rec, separator) {
   const parts = [];
   if (isRankingAdminView()) parts.push(`CB/TGT ROA: ${fmtNumber(rec.cb)}`, `ROA: ${fmtNumber(rec.roa)}`);
-  parts.push(`TAT MTD: ${fmtPercent(rec.tatMtd)}`, `Total Call Esuite: ${fmtNumber(rec.totalCallEsuite, 2)}`,
+  // TAT MTD sengaja TIDAK ditampilkan — tetap dipakai penuh oleh kpiScoreBasis().
+  parts.push(`Total Call Esuite: ${fmtNumber(rec.totalCallEsuite, 2)}`,
     `AVG EC: ${fmtNumber(rec.avgEc, 2)} (target ${fmtNumber(State.settings.avgEcTarget)})`);
   return parts.join(separator);
 }
 function salesmanDetailRevenueFacts(rec, separator) {
   const parts = [];
   if (isRankingAdminView()) parts.push(`Target Omset: ${fmtRupiah(rec.tgtOmsFm)}`, `Total Omset: ${fmtRupiah(rec.mtdOmsFm)}`);
-  parts.push(`TAT MTD: ${fmtPercent(rec.tatMtd)}`);
+  // TAT MTD sengaja TIDAK ditampilkan — tetap dipakai penuh oleh kpiScoreBasis().
   return parts.join(separator);
+}
+/* Gabungan fakta Revenue + Strata 2 dengan pemisah yang HANYA muncul bila kedua bagian terisi.
+   Diperlukan karena setelah TAT MTD tidak lagi ditampilkan, bagian Revenue bisa kosong pada
+   mode Viewer — tanpa ini akan tersisa baris/pemisah kosong. */
+function salesmanDetailRevenueBlock(rec, separator) {
+  const revenue = salesmanDetailRevenueFacts(rec, separator);
+  const strata = salesmanDetailStrata2Facts(rec, separator);
+  return [revenue, strata].filter(part => String(part || '').trim()).join(separator);
 }
 function salesmanDetailStrata2Facts(rec, separator) {
   const parts = [];
@@ -6866,13 +6879,12 @@ function openSalesmanDetailDrawer(row) {
     <div class="detail-group"><h3>Productivity <span class="group-score">(${fmtNumber(groups.productivity.groupScore, 2)})</span></h3>
       <table class="detail-table"><thead><tr><th>KPI</th><th class="ta-right">Aktual</th><th class="ta-right">Score</th><th class="ta-right">Bobot</th><th class="ta-right">Kontribusi</th></tr></thead>
       <tbody>${kpiRow(kpi.roaCb)}${kpiRow(kpi.hitRate)}${kpiRow(kpi.avgEcAch)}</tbody></table>
-      <div class="detail-support-info">${salesmanDetailProductivityFacts(rec, ' • ')}</div>
+      ${salesmanDetailProductivityFacts(rec, ' • ') ? `<div class="detail-support-info">${salesmanDetailProductivityFacts(rec, ' • ')}</div>` : ''}
     </div>
     <div class="detail-group"><h3>Revenue Total <span class="group-score">(${fmtNumber(groups.revenue.groupScore, 2)})</span></h3>
       <table class="detail-table"><thead><tr><th>KPI</th><th class="ta-right">Aktual</th><th class="ta-right">Score</th><th class="ta-right">Bobot</th><th class="ta-right">Kontribusi</th></tr></thead>
       <tbody>${kpiRow(kpi.revenue)}${kpiRow(kpi.strata2)}</tbody></table>
-      <div class="detail-support-info">${salesmanDetailRevenueFacts(rec, ' • ')}<br/>
-        ${salesmanDetailStrata2Facts(rec, ' • ')}</div>
+      <div class="detail-support-info">${salesmanDetailRevenueBlock(rec, ' • ')}</div>
     </div>
     <div class="detail-summary">
       <div><strong>KPI Terbaik:</strong> ${bestKpi ? `${escapeHtml(bestKpi.label)} (${fmtPercent(bestKpi.actual)})` : '-'}</div>
@@ -6936,7 +6948,7 @@ async function generateSalesmanDetailJpg(row) {
       <tbody>
         <tr><td class="ta-left">Proses Kerja</td><td class="ta-left">TGT SC JKS: ${fmtNumber(rec.tgtScJks)} &nbsp;|&nbsp; ACH SC VS JKS: ${fmtNumber(rec.achScVsJks)} &nbsp;|&nbsp; Geofencing: ${fmtNumber(rec.geofencing)}</td></tr>
         <tr><td class="ta-left">Productivity</td><td class="ta-left">${salesmanDetailProductivityFacts(rec, ' &nbsp;|&nbsp; ')}</td></tr>
-        <tr><td class="ta-left">Revenue</td><td class="ta-left">${salesmanDetailRevenueFacts(rec, ' &nbsp;|&nbsp; ')} &nbsp;|&nbsp; ${salesmanDetailStrata2Facts(rec, ' &nbsp;|&nbsp; ')}</td></tr>
+        <tr><td class="ta-left">Revenue</td><td class="ta-left">${salesmanDetailRevenueBlock(rec, ' &nbsp;|&nbsp; ')}</td></tr>
       </tbody>
     </table>
     <div class="jpg-export-kpi-summary">
@@ -7121,8 +7133,8 @@ async function generateDashboardRegionalJpg() {
 const REGIONAL_DEPO_PERF_GROUPS_ALL = [
   { key: 'identity', label: 'Identitas Depo', span: 3, cls: 'rdp-grp-identity', sticky: true, stickyLeft: 0, width: 430 },
   { key: 'process', label: 'Proses Kerja', span: 2, cls: 'rdp-grp-process' },
-  { key: 'productivity', label: 'Productivity', span: 6, cls: 'rdp-grp-productivity' },
-  { key: 'revenue', label: 'Revenue Total', span: 8, cls: 'rdp-grp-revenue' },
+  { key: 'productivity', label: 'Productivity', span: 5, cls: 'rdp-grp-productivity' },
+  { key: 'revenue', label: 'Revenue Total', span: 6, cls: 'rdp-grp-revenue' },
   { key: 'result', label: 'Hasil Akhir', span: 2, cls: 'rdp-grp-result' }
 ];
 function rdpAvgEc(depoRow) {
@@ -7142,16 +7154,13 @@ const REGIONAL_DEPO_PERF_COLUMNS_ALL = [
   { key: 'tgtRoa', group: 'productivity', label: 'TGT ROA', width: 90, value: r => fmtNumber(r.sums.cb, 0), csvValue: r => r.sums.cb },
   { key: 'roa', group: 'productivity', label: 'ROA', width: 86, value: r => fmtNumber(r.sums.roa, 0), csvValue: r => r.sums.roa },
   { key: 'roaCb', group: 'productivity', label: '%ROA', width: 86, value: r => fmtPercent(r.kpi.roaCb.actual), csvValue: r => r.kpi.roaCb.actual },
-  { key: 'tatRoa', group: 'productivity', label: '%TAT', width: 80, value: r => fmtPercent(rankingTatAchievement(r, 'roaCb')), csvValue: r => rankingTatAchievement(r, 'roaCb') },
   { key: 'hitRate', group: 'productivity', label: 'EC VS CALL TOTAL', width: 120, value: r => fmtPercent(r.kpi.hitRate.actual), csvValue: r => r.kpi.hitRate.actual },
   { key: 'targetOmzet', group: 'revenue', label: 'TGT OMZ', width: 104, value: r => rankingCompactMoneyHtml(r.revenueNominal.target), csvValue: r => r.revenueNominal.target },
   { key: 'omzetAktual', group: 'revenue', label: 'OMZET', width: 104, value: r => rankingCompactMoneyHtml(r.revenueNominal.actual), csvValue: r => r.revenueNominal.actual },
   { key: 'achOmzet', group: 'revenue', label: '% OMZ', width: 84, value: r => fmtPercent(r.kpi.revenue.actual), csvValue: r => r.kpi.revenue.actual },
-  { key: 'tatOmzet', group: 'revenue', label: '%TAT', width: 80, value: r => fmtPercent(rankingTatAchievement(r, 'revenue')), csvValue: r => rankingTatAchievement(r, 'revenue') },
   { key: 'targetEpb2', group: 'revenue', label: 'TGT EPB2', width: 88, value: r => fmtNumber(r.sums.tgtEpbStrata2, 0), csvValue: r => r.sums.tgtEpbStrata2 },
   { key: 'epb2', group: 'revenue', label: 'EPB2', width: 80, value: r => fmtNumber(r.sums.achEpbPoinRoa, 0), csvValue: r => r.sums.achEpbPoinRoa },
   { key: 'strata2', group: 'revenue', label: '% EPB2', width: 86, value: r => fmtPercent(r.kpi.strata2.actual), csvValue: r => r.kpi.strata2.actual },
-  { key: 'tatEpb2', group: 'revenue', label: '%TAT', width: 80, value: r => fmtPercent(rankingTatAchievement(r, 'strata2')), csvValue: r => rankingTatAchievement(r, 'strata2') },
   { key: 'finalScore', group: 'result', label: 'Final Score', width: 104, value: r => fmtNumber(r.finalScore, 2), csvValue: r => r.finalScore },
   { key: 'kategori', group: 'result', label: 'Kategori', width: 128, isCategory: true, value: r => categoryBadge(r.category), csvValue: r => r.category ? r.category.label : '' }
 ];
