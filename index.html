@@ -489,7 +489,7 @@ select:focus,input:focus{outline:2px solid var(--gold);outline-offset:1px;}
 /* ===== DataTable ===== */
 .dt-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;}
 .dt-toolbar-right{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
-.dt-ranking-tat-info{flex:0 0 100%;text-align:right;font-size:12.5px;font-weight:700;letter-spacing:.2px;color:#0f766e;margin:-4px 2px 0;}
+.dt-ranking-tat-info{flex:0 0 100%;box-sizing:border-box;text-align:right;font-size:12.5px;font-weight:700;letter-spacing:.2px;color:#0f766e;margin:-4px 0 0;padding:0 2px;}
 .dt-pagesize-label{font-size:12px;color:var(--ink-soft);display:flex;gap:6px;align-items:center;}
 .dt-search-input{min-width:230px;}
 .dt-toolbar select,.dt-toolbar input[type=search],.dt-toolbar .btn{height:36px;box-sizing:border-box;}
@@ -3352,7 +3352,9 @@ class DataTable {
         <button class="btn btn-sm btn-outline dt-export">⬇ Export CSV</button>
         ${this.jpgEnabled ? `<button class="btn btn-sm btn-outline dt-jpg" aria-label="Download tabel sebagai JPG" ${this._jpgBusy ? 'disabled' : ''}>${this._jpgBusy ? 'Menyiapkan JPG...' : '🖼 Download JPG'}</button>` : ''}
       </div>
-      `; /* Info "TAT Hari Ini" sengaja TIDAK dirender pada Ranking — TAT kini faktor internal. */
+      ${this.isRankingTable ? tatTodayInfoHtml() : ''}`; /* Informasi GLOBAL TAT (bukan kolom KPI):
+         dirender di kanan atas toolbar Ranking memakai helper existing tatTodayInfoHtml().
+         Kolom %TAT per KPI TETAP tidak ada — lihat rankingColumns(). */
 
     const scrollWrap = document.createElement('div'); scrollWrap.className = `dt-scroll${view.hasGroupedHeader ? ' dt-scroll-sticky' : ''}${this.mainRankingScroll ? ' dt-ranking-main-scroll' : ''}`;
     const table = document.createElement('table');
@@ -5948,8 +5950,9 @@ function rankingTatMtd(row) {
 }
 /* ------------------------------------------------------------
    INFORMASI TAT GLOBAL ("TAT Hari Ini")
-   Nilai ini adalah pace perusahaan pada snapshot yang sedang dilihat — BUKAN isi kolom %TAT.
-   Kolom %TAT tetap dihitung per entitas melalui rankingTatAchievement().
+   Nilai ini adalah pace perusahaan pada snapshot yang sedang dilihat — INFORMASI GLOBAL saja.
+   Tabel Ranking sengaja TIDAK lagi memiliki kolom %TAT per KPI; TAT tetap dipakai penuh
+   sebagai faktor perhitungan score melalui kpiScoreBasis().
    ------------------------------------------------------------ */
 function activeSnapshotWorkdayMtd(snapshot) {
   const snap = snapshot || State.activeSnapshot;
@@ -5975,7 +5978,7 @@ function tatTodayLabelText(snapshot) {
 function tatTodayInfoHtml() {
   const text = tatTodayLabelText();
   if (!text) return '';
-  return `<div class="dt-ranking-tat-info" title="Pace perusahaan pada snapshot aktif. Kolom %TAT tetap dihitung per entitas.">${escapeHtml(text)}</div>`;
+  return `<div class="dt-ranking-tat-info" title="Pace perusahaan pada snapshot aktif. TAT dipakai sebagai faktor perhitungan score, bukan kolom KPI.">${escapeHtml(text)}</div>`;
 }
 function rankingCompactMoneyHtml(value) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return '-';
