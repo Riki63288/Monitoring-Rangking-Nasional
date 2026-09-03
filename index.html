@@ -112,6 +112,13 @@ body{margin:0;font-family:var(--font);background:var(--bg);color:var(--ink);min-
 .breadcrumb a:hover{color:var(--navy);text-decoration:underline;}
 .topbar-status{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-soft);background:var(--bg-soft);padding:6px 12px;border-radius:20px;}
 .topbar-phase-filter{display:flex;align-items:center;gap:10px;flex-shrink:0;}
+/* PERIOD SELECTOR — compact, satu item per bulan. Scope-nya berbeda dari Global Filter. */
+.topbar-period-filter{display:flex;align-items:center;gap:6px;flex-shrink:0;}
+.topbar-period-label{font-size:12px;font-weight:700;color:#475569;letter-spacing:.2px;white-space:nowrap;}
+.topbar-period-select{height:30px;max-width:220px;padding:0 26px 0 9px;border:1px solid #cbd5e1;border-radius:7px;background:#fff url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath fill='%2364748b' d='M0 0h10L5 6z'/%3E%3C/svg%3E") no-repeat right 9px center;-webkit-appearance:none;appearance:none;font:inherit;font-size:12.5px;font-weight:600;color:#0f172a;cursor:pointer;text-overflow:ellipsis;}
+.topbar-period-select:hover{border-color:#94a3b8;}
+.topbar-period-select:focus-visible{outline:2px solid #0ea5e9;outline-offset:1px;}
+.topbar-period-select:disabled{opacity:.6;cursor:progress;}
 .topbar-phase-label{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-soft);font-weight:600;}
 .topbar-phase-label select{min-width:150px;height:32px;padding:4px 8px;font-size:12.5px;}
 .topbar-phase-chip{display:flex;align-items:center;gap:6px;background:#fdf3d8;color:#946f00;border:1px solid #ecdca4;border-radius:20px;padding:4px 10px;font-size:11.5px;font-weight:700;white-space:nowrap;}
@@ -135,7 +142,7 @@ body{margin:0;font-family:var(--font);background:var(--bg);color:var(--ink);min-
 .topbar-status-popover .status-opt-count{margin-left:auto;font-size:11px;font-weight:800;color:var(--ink-soft);}
 .topbar-status-popover .dt-filter-option{justify-content:space-between;}
 .topbar-vacant-warning{flex-basis:100%;order:99;background:#fdeceb;color:#b33327;border:1px solid #f3c8c4;border-radius:8px;padding:6px 12px;font-size:11.5px;font-weight:800;margin-top:8px;}
-@media (max-width:900px){.topbar-phase-filter{order:3;}.topbar-global-filter-btn{max-width:100%;}}
+@media (max-width:900px){.topbar-phase-filter{order:3;}.topbar-global-filter-btn{max-width:100%;}.topbar-period-filter{order:2;}.topbar-period-select{max-width:170px;}}
 .topbar-status .dot{width:7px;height:7px;border-radius:50%;background:var(--green);}
 
 .topbar-data-summary{
@@ -815,6 +822,8 @@ select:focus,input:focus{outline:2px solid var(--gold);outline-offset:1px;}
 .dropzone-icon{font-size:32px;margin-bottom:8px;}
 .dropzone-hint{font-size:12px;color:var(--ink-soft);}
 .upload-form-row{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;}
+.upload-period-hint{margin:-4px 0 12px;font-size:12.5px;font-weight:600;color:#0f766e;}
+.upload-period-hint.warn{color:#b45309;}
 .upload-form-row label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-soft);font-weight:600;}
 .upload-preview h3{font-size:14px;color:var(--navy);margin:18px 0 10px;}
 .validation-summary{display:flex;flex-direction:column;gap:8px;}
@@ -1307,6 +1316,14 @@ const State = {
   remoteSource: null,
   remoteStatusMessage: '',
   publicationBusy: false,
+  // --- PERIODE (SCOPE TERPISAH dari GLOBAL FILTER dan dari PUBLISH SCOPE) ---
+  // periods           : daftar periode RESMI (satu item per bulan), terbaru dulu by periodKey.
+  // activePeriodKey   : periode yang sedang ditampilkan (Viewer maupun Admin preview publik).
+  // periodFeatureReady: false bila migration period belum diterapkan -> UI jatuh ke mode legacy.
+  periods: [],
+  activePeriodKey: null,
+  periodFeatureReady: false,
+  periodBusy: false,
   settings: null,
   activeSnapshot: null,
   validation: null,
@@ -1847,16 +1864,37 @@ const Storage = (() => {
     const store = await tx(APP_CONFIG.STORE_MASTER_CABANG, 'readonly');
     return new Promise((resolve, reject) => { const r = store.get('active'); r.onsuccess = () => resolve(r.result || null); r.onerror = (e) => reject(e.target.error); });
   }
-  async function saveViewerCache(payload, remoteMeta) {
+  /* Cache Viewer di-scope PER PERIODE.
+     key 'active'          = cache legacy (dipertahankan agar build lama tetap terbaca)
+     key 'period:YYYY-MM'  = cache official dataset satu bulan
+     Memilih Agustus TIDAK BOLEH menghasilkan data September, karena itu cacheKey
+     ditentukan dari periodKey dan TIDAK PERNAH jatuh ke 'active' saat periodKey diminta. */
+  const VIEWER_CACHE_LEGACY_KEY = 'active';
+  function viewerCacheKey(periodKey) {
+    const key = typeof periodKey === 'string' ? periodKey.trim() : '';
+    return /^\d{4}-(0[1-9]|1[0-2])$/.test(key) ? `period:${key}` : VIEWER_CACHE_LEGACY_KEY;
+  }
+  async function saveViewerCache(payload, remoteMeta, periodKey) {
     const store = await tx(APP_CONFIG.STORE_VIEWER_CACHE, 'readwrite');
-    const record = { id: 'active', payload, remoteMeta: remoteMeta || {}, cachedAt: Date.now() };
+    const id = viewerCacheKey(periodKey);
+    const record = { id, periodKey: id === VIEWER_CACHE_LEGACY_KEY ? null : id.slice(7), payload, remoteMeta: remoteMeta || {}, cachedAt: Date.now() };
     return new Promise((resolve, reject) => { const r = store.put(record); r.onsuccess = () => resolve(record); r.onerror = (e) => reject(e.target.error); });
   }
-  async function getViewerCache() {
+  async function getViewerCache(periodKey) {
     const store = await tx(APP_CONFIG.STORE_VIEWER_CACHE, 'readonly');
-    return new Promise((resolve, reject) => { const r = store.get('active'); r.onsuccess = () => resolve(r.result || null); r.onerror = (e) => reject(e.target.error); });
+    const id = viewerCacheKey(periodKey);
+    return new Promise((resolve, reject) => { const r = store.get(id); r.onsuccess = () => resolve(r.result || null); r.onerror = (e) => reject(e.target.error); });
   }
-  return { saveSnapshot, saveAndActivateSnapshot, listSnapshots, getSnapshot, deleteSnapshot, setActiveSnapshot, getActiveSnapshot, saveSettings, getSettings, listVacantSalesmen, putVacantSalesmen, deleteVacantSalesman, clearVacantSalesmen, saveMasterCabang, getMasterCabang, saveViewerCache, getViewerCache };
+  // Daftar cache periode (untuk period selector saat Supabase tidak dapat dihubungi).
+  async function listViewerCachePeriods() {
+    const store = await tx(APP_CONFIG.STORE_VIEWER_CACHE, 'readonly');
+    return new Promise((resolve, reject) => {
+      const r = store.getAll();
+      r.onsuccess = () => resolve((r.result || []).filter(row => row && typeof row.periodKey === 'string' && row.periodKey));
+      r.onerror = (e) => reject(e.target.error);
+    });
+  }
+  return { saveSnapshot, saveAndActivateSnapshot, listSnapshots, getSnapshot, deleteSnapshot, setActiveSnapshot, getActiveSnapshot, saveSettings, getSettings, listVacantSalesmen, putVacantSalesmen, deleteVacantSalesman, clearVacantSalesmen, saveMasterCabang, getMasterCabang, saveViewerCache, getViewerCache, listViewerCachePeriods };
 })();
 
 // LocalStorage: hanya untuk preferensi ringan (bukan dataset)
@@ -2078,6 +2116,82 @@ function compareMasterCabangWithActiveData(dedupedRows) {
    HK TIDAK dihitung dari cutoff date, jumlah hari kalender, atau baris data Salesman.
    HK adalah INFORMASI saja dan TIDAK pernah masuk formula KPI/score/%TAT.
    ------------------------------------------------------------ */
+/* ------------------------------------------------------------
+   PERIODE BULANAN (MTD / CLOSING)
+   ------------------------------------------------------------
+   SATU BULAN = SATU DATASET RESMI. period_key kanonik = 'YYYY-MM'.
+   period_status = 'MTD' | 'CLOSING'. Sekali sebuah periode menjadi CLOSING,
+   periode tersebut TIDAK PERNAH boleh kembali menjadi MTD — aturan itu dikunci di
+   database (trigger + RPC pada supabase/period-history-migration.sql); UI di sini
+   hanya mencegah lebih awal agar pesannya jelas, BUKAN satu-satunya penjaga.
+
+   Periode SELALU diturunkan dari cutoff date data (bukan dari bulan browser),
+   sehingga backfill bulan lama tidak pernah salah label.
+   ------------------------------------------------------------ */
+const PERIOD_STATUS_MTD = 'MTD';
+const PERIOD_STATUS_CLOSING = 'CLOSING';
+const PERIOD_STATUS_LABELS = { MTD: 'MTD', CLOSING: 'Closing' };
+const PERIOD_MONTH_NAMES_ID = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+const PERIOD_KEY_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+// TAT Closing wajib 100%. Toleransi disamakan dengan toleransi konsistensi TAT yang
+// sudah dipakai validateCanonicalSnapshot (0.01) supaya tidak ada dua standar berbeda.
+const CLOSING_TAT_TARGET = 100;
+const CLOSING_TAT_TOLERANCE = 0.01;
+
+function isValidPeriodKey(value) { return PERIOD_KEY_RE.test(String(value == null ? '' : value).trim()); }
+// 'YYYY-MM-DD' -> 'YYYY-MM'. Mengembalikan '' bila tanggal tidak valid — TIDAK PERNAH menebak.
+function periodKeyFromCutoffDate(cutoffDate) {
+  const text = String(cutoffDate == null ? '' : cutoffDate).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return '';
+  const key = text.slice(0, 7);
+  return isValidPeriodKey(key) ? key : '';
+}
+function normalizePeriodKeyValue(value) {
+  const text = String(value == null ? '' : value).trim();
+  if (isValidPeriodKey(text)) return text;
+  return periodKeyFromCutoffDate(text);
+}
+function normalizePeriodStatusValue(value) {
+  const text = String(value == null ? '' : value).trim().toUpperCase();
+  if (text === PERIOD_STATUS_CLOSING) return PERIOD_STATUS_CLOSING;
+  if (text === PERIOD_STATUS_MTD) return PERIOD_STATUS_MTD;
+  return null;
+}
+function periodStatusLabel(value) {
+  const status = normalizePeriodStatusValue(value);
+  return status ? PERIOD_STATUS_LABELS[status] : '';
+}
+// '2026-09' -> 'September 2026'
+function periodMonthLabel(periodKey) {
+  const key = normalizePeriodKeyValue(periodKey);
+  if (!key) return '-';
+  const monthIndex = Number(key.slice(5, 7)) - 1;
+  return `${PERIOD_MONTH_NAMES_ID[monthIndex] || '-'} ${key.slice(0, 4)}`;
+}
+// 'September 2026 — MTD'
+function periodOptionLabel(periodKey, periodStatus) {
+  const month = periodMonthLabel(periodKey);
+  const status = periodStatusLabel(periodStatus);
+  return status ? `${month} — ${status}` : month;
+}
+// Status periode sebuah snapshot. Snapshot legacy tanpa metadata periode diperlakukan
+// sebagai MTD (fallback konservatif, sama seperti backfill database).
+function snapshotPeriodStatus(snapshot) {
+  const snap = snapshot === undefined ? State.activeSnapshot : snapshot;
+  return normalizePeriodStatusValue(snap && snap.periodStatus) || PERIOD_STATUS_MTD;
+}
+function snapshotPeriodKey(snapshot) {
+  const snap = snapshot === undefined ? State.activeSnapshot : snapshot;
+  if (!snap) return '';
+  return normalizePeriodKeyValue(snap.periodKey) || periodKeyFromCutoffDate(snap.cutoffDate);
+}
+function isClosingPeriodSnapshot(snapshot) { return snapshotPeriodStatus(snapshot) === PERIOD_STATUS_CLOSING; }
+// TAT Closing WAJIB 100% — angka source TIDAK PERNAH ditimpa menjadi 100, hanya divalidasi.
+function isClosingTatValue(tatValue) {
+  const numeric = Number(tatValue);
+  return Number.isFinite(numeric) && Math.abs(numeric - CLOSING_TAT_TARGET) <= CLOSING_TAT_TOLERANCE;
+}
+
 const WORKDAY_MTD_CELL = 'G2';
 const WORKDAY_MTD_COL_INDEX = 6;  // kolom G (0-based)
 const WORKDAY_MTD_ROW_INDEX = 1;  // baris 2 (0-based)
@@ -2513,15 +2627,47 @@ function getSnapshotRevisionNumber(snapshot) {
   const revisionNumber = Number(snapshot && snapshot.revisionNumber);
   return Number.isInteger(revisionNumber) && revisionNumber > 0 ? revisionNumber : 1;
 }
-function getNextLocalRevisionNumber(cutoffDate) {
+/* ------------------------------------------------------------
+   REVISI DATA — SEQUENTIAL PER PERIOD (BULAN), BUKAN PER CUTOFF DATE
+   ------------------------------------------------------------
+   Sebelumnya urutan dihitung per cutoff_date exact, sehingga tiga upload MTD
+   pada bulan yang sama dengan tanggal berbeda semuanya menjadi "Rev 1".
+   Sekarang urutannya mengikuti period_key:
+
+     10 Agustus  MTD      -> Rev Data 1
+     20 Agustus  MTD      -> Rev Data 2
+     31 Agustus  Closing  -> Rev Data 3
+     Koreksi Closing      -> Rev Data 4
+
+   Perubahan status MTD -> CLOSING TIDAK PERNAH me-reset urutan.
+   Snapshot legacy tanpa periodKey diturunkan dengan aman dari cutoffDate,
+   sehingga riwayat upload lama tidak rusak.
+
+   Ini adalah REVISI DATA (workspace lokal Admin) — TERPISAH dari
+   REVISI PUBLIKASI (period_revision_number, dihitung backend secara atomic).
+   ------------------------------------------------------------ */
+function snapshotPeriodKeyForRevision(snapshot) {
+  if (!snapshot) return '';
+  return normalizePeriodKeyValue(snapshot.periodKey) || periodKeyFromCutoffDate(snapshot.cutoffDate);
+}
+function localSnapshotsForPeriod(periodKey) {
+  const key = normalizePeriodKeyValue(periodKey);
+  if (!key) return [];
   const snapshots = Array.isArray(State.snapshotList) ? State.snapshotList : [];
+  return snapshots.filter(snapshot => snapshot && snapshotPeriodKeyForRevision(snapshot) === key);
+}
+function getNextLocalRevisionNumberForPeriod(periodKey) {
   let maxRevisionNumber = 0;
-  snapshots.forEach(snapshot => {
-    if (!snapshot || snapshot.cutoffDate !== cutoffDate) return;
+  localSnapshotsForPeriod(periodKey).forEach(snapshot => {
     maxRevisionNumber = Math.max(maxRevisionNumber, getSnapshotRevisionNumber(snapshot));
   });
   const nextRevisionNumber = maxRevisionNumber > 0 ? maxRevisionNumber + 1 : 1;
   return Number.isInteger(nextRevisionNumber) && nextRevisionNumber > 0 ? nextRevisionNumber : 1;
+}
+// Nama lama dipertahankan sebagai wrapper agar pemanggil lain (bila ada) tidak rusak.
+// Argumennya boleh berupa cutoffDate 'YYYY-MM-DD' maupun periodKey 'YYYY-MM'.
+function getNextLocalRevisionNumber(cutoffDateOrPeriodKey) {
+  return getNextLocalRevisionNumberForPeriod(normalizePeriodKeyValue(cutoffDateOrPeriodKey));
 }
 function snapshotDateValue(snapshot) {
   const cutoffDate = String(snapshot && snapshot.cutoffDate ? snapshot.cutoffDate : '');
@@ -4389,6 +4535,11 @@ function canonicalSnapshot(snapshot) {
     tatMtd: isValidTatMtdValue(snapshot.tatMtd) ? Number(snapshot.tatMtd) : null,
     tatSourceKey: snapshot.tatSourceKey || null,
     tatFormulaVersion: snapshot.tatFormulaVersion || null,
+    // METADATA PERIODE (opsional & non-breaking, schemaVersion tetap 1).
+    // Snapshot legacy tanpa field ini tetap valid: periodKey diturunkan dari cutoffDate
+    // dan periodStatus jatuh ke MTD — konsisten dengan backfill database.
+    periodKey: normalizePeriodKeyValue(snapshot.periodKey) || periodKeyFromCutoffDate(snapshot.cutoffDate) || null,
+    periodStatus: normalizePeriodStatusValue(snapshot.periodStatus) || PERIOD_STATUS_MTD,
     // HK MTD (informasi, bukan bagian formula). Snapshot legacy tanpa HK -> null, TIDAK dikarang.
     workdayMtd: normalizeWorkdayMtdValue(snapshot.workdayMtd),
     workdaySourceCell: normalizeWorkdayMtdValue(snapshot.workdayMtd) === null ? null : String(snapshot.workdaySourceCell || WORKDAY_MTD_CELL),
@@ -4404,6 +4555,17 @@ function validateCanonicalSnapshot(snapshot, label) {
   if (snapshot.tatFormulaVersion === APP_CONFIG.CURRENT_TAT_FORMULA_VERSION) {
     const tatValidation = validateTatDataset(snapshot.rawRecords);
     if (!tatValidation.valid || Math.abs(tatValidation.tatMtd - Number(snapshot.tatMtd)) > 0.01) throw new Error(`${label}.rawRecords memiliki TAT MTD yang tidak konsisten.`);
+  }
+  // Metadata periode bersifat LEGACY-TOLERANT: payload lama tanpa periodKey/periodStatus tetap
+  // valid. Bila ADA, isinya wajib konsisten — periode tidak boleh berbeda bulan dari cutoffDate.
+  if (snapshot.periodKey !== null && snapshot.periodKey !== undefined && snapshot.periodKey !== '') {
+    if (!isValidPeriodKey(snapshot.periodKey)) throw new Error(`${label}.periodKey tidak valid.`);
+    if (snapshot.periodKey !== periodKeyFromCutoffDate(snapshot.cutoffDate)) {
+      throw new Error(`${label}.periodKey tidak sesuai dengan cutoffDate.`);
+    }
+  }
+  if (snapshot.periodStatus !== null && snapshot.periodStatus !== undefined && snapshot.periodStatus !== '') {
+    if (!normalizePeriodStatusValue(snapshot.periodStatus)) throw new Error(`${label}.periodStatus tidak valid.`);
   }
 }
 function validatePublishedPayload(payload) {
@@ -4653,15 +4815,59 @@ function isDuplicateRevisionError(error) {
   const code = String((error && error.code) || '');
   return code === '23505' || /revisi yang sama sudah tersedia|duplicate key|already exists|unique constraint/i.test(message);
 }
-// Kandidat pembanding diambil SEKALI saat dialog dibuka (tidak diulang tiap perubahan checkbox).
-async function fetchPublishComparisonCandidate() {
+/**
+ * Revisi PUBLIKASI berikutnya untuk satu PERIODE (bukan per cutoff_date).
+ * Nilai ini hanya dipakai untuk PREVIEW — otoritas final tetap backend
+ * (publish_period_snapshot_v1 menghitung ulang dan menulis ulang metadata payload).
+ * FAIL-CLOSED: melempar error bila tidak dapat diperiksa, tidak pernah menebak.
+ */
+async function getNextPeriodPublicationRevision(periodKey) {
+  const key = normalizePeriodKeyValue(periodKey);
+  if (!key) throw new Error('Revisi publikasi terbaru tidak dapat diperiksa: periode tidak valid.');
+  if (!State.isAdmin || State.runtimeMode !== 'admin') throw new Error('Revisi publikasi terbaru tidak dapat diperiksa: akses admin diperlukan.');
+  if (!State.supabaseReady || !window.SupabaseService || typeof window.SupabaseService.getClient !== 'function') {
+    throw new Error('Revisi publikasi terbaru tidak dapat diperiksa: koneksi Supabase belum siap.');
+  }
+  const { data, error } = await window.SupabaseService.getClient()
+    .from(PUBLISHED_SNAPSHOTS_TABLE)
+    .select('period_revision_number')
+    .eq('period_month', `${key}-01`)
+    .order('period_revision_number', { ascending: false })
+    .limit(1);
+  if (error) throw new Error(`Revisi publikasi terbaru tidak dapat diperiksa: ${safeUserError(error, 'query database gagal')}`);
+  const rows = Array.isArray(data) ? data : [];
+  if (!rows.length) return 1;
+  const latest = Number(rows[0] && rows[0].period_revision_number);
+  if (!Number.isFinite(latest)) throw new Error('Revisi publikasi terbaru tidak dapat diperiksa: nomor revisi database tidak valid.');
+  const next = Math.floor(latest) + 1;
+  if (!isPositiveInteger(next)) throw new Error('Revisi publikasi terbaru tidak dapat diperiksa: nomor revisi berikutnya tidak valid.');
+  return next;
+}
+/**
+ * Kandidat pembanding diambil SEKALI saat dialog dibuka.
+ *
+ * WRONG-PERIOD COMPARISON GUARD: pembanding WAJIB berasal dari publikasi resmi
+ * PERIODE YANG SAMA. Backfill Juni TIDAK PERNAH dibandingkan dengan September yang
+ * sedang is_active. Bila periode tersebut belum pernah dipublikasikan -> null.
+ * Mode legacy (migration belum diterapkan) tetap memakai perilaku lama (is_active).
+ */
+async function fetchPublishComparisonCandidate(periodKey) {
+  const key = normalizePeriodKeyValue(periodKey);
   try {
-    const currentRemote = await window.SupabaseService.getActivePublishedSnapshot();
-    if (currentRemote && currentRemote.payload_json) {
-      validatePublishedPayload(currentRemote.payload_json);
-      return canonicalSnapshot(currentRemote.payload_json.activeSnapshot);
+    let remote = null;
+    if (State.periodFeatureReady && key && window.SupabaseService && typeof window.SupabaseService.getOfficialPeriodSnapshot === 'function') {
+      remote = await window.SupabaseService.getOfficialPeriodSnapshot(key);
+    } else {
+      remote = await window.SupabaseService.getActivePublishedSnapshot();
+      // Guard tambahan untuk mode legacy: buang pembanding dari bulan yang berbeda.
+      if (remote && key && periodKeyFromCutoffDate(remote.cutoff_date || '') !== key) remote = null;
+    }
+    if (remote && remote.payload_json) {
+      validatePublishedPayload(remote.payload_json);
+      return canonicalSnapshot(remote.payload_json.activeSnapshot);
     }
   } catch (error) {
+    if (isPeriodFeatureMissingError(error)) return null;
     throw new Error(`Snapshot pembanding tidak dapat disiapkan: ${safeUserError(error, 'data remote tidak valid')}`);
   }
   return null;
@@ -4709,6 +4915,10 @@ function buildPublishedPayloadForScope(regions, comparisonCandidate, publication
       revisionNumber: Number(publicationRevisionNumber),
       // sourceRevisionNumber = REVISI DATA (opsional & non-breaking; payload lama boleh tidak punya).
       sourceRevisionNumber: currentSourceRevisionNumber(),
+      // METADATA PERIODE (opsional & non-breaking, schemaVersion tetap 1).
+      // Backend menulis ulang kedua field ini agar SELALU sama dengan baris database.
+      periodKey: snapshotPeriodKey(activeSnapshot),
+      periodStatus: snapshotPeriodStatus(activeSnapshot),
       fileName: activeSnapshot.fileName,
       recordCount,
       eligibleCount,
@@ -4766,8 +4976,11 @@ async function buildPublishedPayload(regions) {
   const scope = regions === undefined || regions === null
     ? getPublishScopeRegionOptions(State.activeSnapshot).map(option => option.value)
     : regions;
-  const comparisonCandidate = await fetchPublishComparisonCandidate();
-  const publicationRevision = await getNextPublicationRevision(State.activeSnapshot.cutoffDate);
+  const periodKey = snapshotPeriodKey(State.activeSnapshot);
+  const comparisonCandidate = await fetchPublishComparisonCandidate(periodKey);
+  const publicationRevision = State.periodFeatureReady
+    ? await getNextPeriodPublicationRevision(periodKey)
+    : await getNextPublicationRevision(State.activeSnapshot.cutoffDate);
   return buildPublishedPayloadForScope(scope, comparisonCandidate, publicationRevision);
 }
 function normalizeRemotePublication(remoteMeta, source, cachedAt) {
@@ -4784,6 +4997,15 @@ function normalizeRemotePublication(remoteMeta, source, cachedAt) {
     fileName: String((remoteMeta && remoteMeta.file_name) || metadata.fileName || ''),
     recordCount: Number((remoteMeta && remoteMeta.record_count) || metadata.recordCount || 0),
     eligibleCount: Number((remoteMeta && remoteMeta.eligible_count) || metadata.eligibleCount || 0),
+    // METADATA PERIODE. Kolom database adalah sumber utama; payload metadata sebagai fallback;
+    // cutoff_date sebagai fallback terakhir (baris legacy sebelum migration).
+    periodKey: normalizePeriodKeyValue((remoteMeta && remoteMeta.period_month) || '')
+      || normalizePeriodKeyValue(metadata.periodKey)
+      || periodKeyFromCutoffDate((remoteMeta && remoteMeta.cutoff_date) || metadata.cutoffDate || ''),
+    periodStatus: normalizePeriodStatusValue(remoteMeta && remoteMeta.period_status)
+      || normalizePeriodStatusValue(metadata.periodStatus)
+      || PERIOD_STATUS_MTD,
+    periodRevisionNumber: Number((remoteMeta && remoteMeta.period_revision_number) || 0) || null,
     source,
     cachedAt: Number(cachedAt || 0)
   };
@@ -4816,30 +5038,246 @@ async function hydratePublishedPayload(payload, remoteMeta, source, cachedAt) {
   State.remotePublication = normalizeRemotePublication({ ...(remoteMeta || {}), payload_json: payload }, source, cachedAt);
   State.remoteSource = source;
   State.remoteStatusMessage = '';
+  // Periode aktif SELALU mengikuti snapshot yang benar-benar dimuat, sehingga label
+  // period selector tidak pernah berbeda dari dataset yang sedang dirender.
+  State.activePeriodKey = (State.remotePublication && State.remotePublication.periodKey)
+    || snapshotPeriodKey(State.activeSnapshot) || null;
 }
+
+/* ------------------------------------------------------------
+   PERIODE — PENGAMBILAN DAFTAR & PEMILIHAN DEFAULT
+   ------------------------------------------------------------
+   Default Viewer/Admin = PERIOD_KEY TERBESAR, BUKAN published_at terbaru.
+   Backfill Juni yang dipublish hari ini TIDAK boleh menggeser default dari September.
+   ------------------------------------------------------------ */
+function sortPeriodsNewestFirst(periods) {
+  return (Array.isArray(periods) ? periods.slice() : [])
+    .filter(period => period && isValidPeriodKey(period.periodKey))
+    .sort((a, b) => (a.periodKey < b.periodKey ? 1 : (a.periodKey > b.periodKey ? -1 : 0)));
+}
+function newestPeriodKey(periods) {
+  const sorted = sortPeriodsNewestFirst(periods);
+  return sorted.length ? sorted[0].periodKey : null;
+}
+function findPeriodEntry(periodKey) {
+  const key = normalizePeriodKeyValue(periodKey);
+  if (!key) return null;
+  return State.periods.find(period => period.periodKey === key) || null;
+}
+function periodEntryForKey(periodKey) { return findPeriodEntry(periodKey); }
+
+/* ------------------------------------------------------------
+   CLOSING LOCK — SATU SOURCE OF TRUTH DI FRONTEND
+   ------------------------------------------------------------
+   Sebuah periode dianggap SUDAH CLOSING bila SALAH SATU benar:
+
+     A. Publikasi resmi periode itu di Supabase berstatus CLOSING, ATAU
+     B. Ada snapshot LOKAL (IndexedDB) periode itu berstatus CLOSING —
+        walaupun BELUM pernah dipublikasikan.
+
+   Kondisi (B) penting: Admin yang menyimpan "Agustus Closing" secara lokal
+   TIDAK boleh lagi menyimpan "Agustus MTD" hanya karena Closing-nya belum
+   dipublish. Lock tidak menunggu publish.
+
+   Koreksi Closing tetap DIPERBOLEHKAN — yang dikunci hanya CLOSING -> MTD.
+
+   Ini murni UX safety. Penjaga sesungguhnya tetap database
+   (trigger + publish_period_snapshot_v1), yang menolak walaupun frontend
+   dimanipulasi lewat DevTools/API.
+   ------------------------------------------------------------ */
+function officialPeriodHasClosing(periodKey) {
+  const entry = findPeriodEntry(periodKey);
+  return !!entry && normalizePeriodStatusValue(entry.periodStatus) === PERIOD_STATUS_CLOSING;
+}
+function localPeriodHasClosing(periodKey) {
+  const key = normalizePeriodKeyValue(periodKey);
+  if (!key) return false;
+  const snapshots = Array.isArray(State.snapshotList) ? State.snapshotList : [];
+  return snapshots.some(snapshot => snapshot
+    && snapshotPeriodKeyForRevision(snapshot) === key
+    && normalizePeriodStatusValue(snapshot.periodStatus) === PERIOD_STATUS_CLOSING);
+}
+function periodHasClosing(periodKey) {
+  return officialPeriodHasClosing(periodKey) || localPeriodHasClosing(periodKey);
+}
+// Nama lama dipertahankan sebagai alias — seluruh pemanggil kini memakai rule gabungan.
+function periodIsAlreadyClosing(periodKey) { return periodHasClosing(periodKey); }
+// Penjelasan sumber kunci, dipakai UI agar pesannya spesifik dan tidak membingungkan.
+function periodClosingLockSource(periodKey) {
+  if (officialPeriodHasClosing(periodKey)) return 'official';
+  if (localPeriodHasClosing(periodKey)) return 'local';
+  return '';
+}
+
+/* ------------------------------------------------------------
+   AKTIVASI SNAPSHOT LOKAL — KONSISTENSI DENGAN LIFECYCLE PERIODE
+   ------------------------------------------------------------
+   State.activeSnapshot TIDAK BOLEH berstatus MTD bila periodenya sudah Closing.
+   Kalau itu terjadi, period selector Admin akan menampilkan "Agustus — Closing"
+   sementara data yang dirender adalah MTD lama — mismatch yang menyesatkan.
+
+   Riwayat TIDAK PERNAH dihapus: revisi MTD lama tetap tampil, tetap bisa
+   "Lihat Ranking" dan "Export" untuk AUDIT. Yang dikunci hanya menjadikannya
+   snapshot aktif. Revisi Closing lama tetap boleh diaktifkan (rollback Closing).
+
+   Memakai periodHasClosing() sebagai satu-satunya sumber aturan — tidak ada
+   duplikasi rule lifecycle.
+   ------------------------------------------------------------ */
+function isSnapshotActivationBlocked(snapshot) {
+  if (!snapshot) return false;
+  if (snapshotPeriodStatus(snapshot) !== PERIOD_STATUS_MTD) return false;  // Closing selalu boleh
+  return periodHasClosing(snapshotPeriodKeyForRevision(snapshot));
+}
+function snapshotActivationBlockReason(snapshot) {
+  const key = snapshotPeriodKeyForRevision(snapshot);
+  const source = periodClosingLockSource(key) === 'local'
+    ? 'sudah Closing di workspace lokal'
+    : 'sudah dipublikasikan sebagai Closing';
+  return `${periodMonthLabel(key)} ${source}. Revisi MTD lama tetap tersimpan untuk audit, tetapi tidak dapat dijadikan data aktif.`;
+}
+
+/* ------------------------------------------------------------
+   DELETE LOCK — PERIODE YANG SUDAH CLOSING = AUDIT TRAIL
+   ------------------------------------------------------------
+   Begitu suatu bulan pernah memiliki CLOSING (LOKAL maupun OFFICIAL), SELURUH
+   snapshot lokal bulan itu terkunci dari penghapusan — MTD lama, Closing lama,
+   maupun Closing terbaru.
+
+   ALASANNYA bukan sekadar kerapian: Closing lokal yang belum dipublikasikan
+   adalah SATU-SATUNYA bukti bahwa bulan tersebut sudah Closing. Bila bukti itu
+   dapat dihapus, periodHasClosing() kembali false dan Admin bisa menyimpan
+   "Agustus MTD Rev 3" lagi — artinya CLOSING -> MTD lolos lewat pintu belakang.
+   Delete lock inilah yang menutup celah tersebut.
+
+   Sebelum ada Closing, penghapusan revisi MTD tetap mengikuti perilaku existing.
+   Koreksi Closing SELALU lewat revisi Closing BARU, tidak pernah dengan menghapus
+   atau menimpa revisi lama.
+
+   Memakai periodHasClosing() — sumber aturan lifecycle yang sama dengan
+   upload/save/publish/aktivasi. Tidak ada rule yang diduplikasi.
+   ------------------------------------------------------------ */
+function isSnapshotDeleteBlocked(snapshot) {
+  if (!snapshot) return false;
+  return periodHasClosing(snapshotPeriodKeyForRevision(snapshot));
+}
+function snapshotDeleteBlockReason(snapshot) {
+  const key = snapshotPeriodKeyForRevision(snapshot);
+  const source = periodClosingLockSource(key) === 'local'
+    ? 'sudah Closing di workspace lokal'
+    : 'sudah dipublikasikan sebagai Closing';
+  return `Periode ${periodMonthLabel(key)} ${source}. Riwayat tidak dapat dihapus — seluruh revisinya menjadi audit trail. Lakukan koreksi dengan menyimpan revisi Closing baru.`;
+}
+// Label periode aktif untuk topbar. Memakai daftar resmi bila ada; bila tidak, jatuh ke
+// metadata publikasi yang sedang dimuat — tidak pernah menampilkan bulan yang salah.
+function activePeriodLabel() {
+  const key = State.activePeriodKey || (State.remotePublication && State.remotePublication.periodKey) || '';
+  if (!key) return '';
+  const entry = findPeriodEntry(key);
+  const status = entry ? entry.periodStatus
+    : (State.remotePublication && State.remotePublication.periodKey === key ? State.remotePublication.periodStatus : null);
+  return periodOptionLabel(key, status);
+}
+function isPeriodFeatureMissingError(error) {
+  const code = String((error && error.code) || '');
+  return code === 'PERIOD_FEATURE_MISSING'
+    || (window.SupabaseService && code === window.SupabaseService.PERIOD_FEATURE_MISSING);
+}
+/**
+ * Mengambil daftar periode RESMI (satu item per bulan). Tidak pernah melempar:
+ * bila fitur period belum aktif di database atau koneksi bermasalah, State.periods
+ * jatuh ke daftar dari cache lokal agar Viewer offline tetap dapat berpindah bulan.
+ */
+async function refreshOfficialPeriods() {
+  if (State.supabaseReady && window.SupabaseService && typeof window.SupabaseService.getOfficialPeriods === 'function') {
+    try {
+      const rows = await window.SupabaseService.getOfficialPeriods(36);
+      State.periods = sortPeriodsNewestFirst(rows);
+      State.periodFeatureReady = true;
+      return State.periods;
+    } catch (error) {
+      if (!isPeriodFeatureMissingError(error)) console.error('Daftar periode gagal diambil:', error);
+      State.periodFeatureReady = false;
+    }
+  } else {
+    State.periodFeatureReady = false;
+  }
+  // Fallback offline: periode yang pernah di-cache di perangkat ini.
+  try {
+    const cached = await Storage.listViewerCachePeriods();
+    State.periods = sortPeriodsNewestFirst(cached.map(row => ({
+      periodKey: row.periodKey,
+      periodStatus: normalizePeriodStatusValue(row.remoteMeta && row.remoteMeta.period_status)
+        || normalizePeriodStatusValue(row.payload && row.payload.metadata && row.payload.metadata.periodStatus)
+        || PERIOD_STATUS_MTD,
+      cutoffDate: String((row.remoteMeta && row.remoteMeta.cutoff_date) || ''),
+      fromCache: true
+    })));
+  } catch (cacheError) {
+    console.error('Daftar periode cache tidak dapat dibaca:', cacheError);
+    State.periods = [];
+  }
+  return State.periods;
+}
+
+/**
+ * Memuat official dataset untuk SATU periode.
+ *   options.periodKey  : periode yang diminta. Bila kosong -> periode terbaru by period_key.
+ *   options.allowCache : boleh jatuh ke cache Viewer bila remote gagal.
+ * Cache yang dipakai SELALU cache periode yang diminta — memilih Agustus tidak akan
+ * pernah menampilkan September dari cache.
+ */
 async function loadViewerNationalData(options = {}) {
   const allowCache = options.allowCache !== false;
+  let requestedPeriod = normalizePeriodKeyValue(options.periodKey);
   try {
     if (!State.supabaseReady) throw new Error('Supabase belum siap.');
+    await refreshOfficialPeriods();
+
+    if (State.periodFeatureReady) {
+      if (!requestedPeriod || !findPeriodEntry(requestedPeriod)) requestedPeriod = newestPeriodKey(State.periods);
+      if (!requestedPeriod) {
+        await loadSnapshotIntoState(null);
+        State.remotePublication = null;
+        State.activePeriodKey = null;
+        State.remoteSource = 'supabase';
+        State.remoteStatusMessage = 'Belum ada data nasional yang dipublikasikan.';
+        return { status: 'empty' };
+      }
+      const remote = await window.SupabaseService.getOfficialPeriodSnapshot(requestedPeriod);
+      if (!remote || !remote.payload_json) throw new Error(`Data periode ${periodMonthLabel(requestedPeriod)} tidak tersedia.`);
+      await hydratePublishedPayload(remote.payload_json, remote, 'supabase');
+      State.activePeriodKey = requestedPeriod;
+      try { await Storage.saveViewerCache(remote.payload_json, remote, requestedPeriod); }
+      catch (cacheError) { console.error('Cache Viewer gagal diperbarui:', cacheError); }
+      return { status: 'remote', periodKey: requestedPeriod };
+    }
+
+    // MODE LEGACY: migration period belum diterapkan -> perilaku lama (is_active) dipertahankan.
     const remote = await window.SupabaseService.getActivePublishedSnapshot();
     if (!remote) {
       await loadSnapshotIntoState(null);
       State.remotePublication = null;
+      State.activePeriodKey = null;
       State.remoteSource = 'supabase';
       State.remoteStatusMessage = 'Belum ada data nasional yang dipublikasikan.';
       return { status: 'empty' };
     }
     await hydratePublishedPayload(remote.payload_json, remote, 'supabase');
-    try { await Storage.saveViewerCache(remote.payload_json, remote); } catch (cacheError) { console.error('Cache Viewer gagal diperbarui:', cacheError); }
-    return { status: 'remote' };
+    try { await Storage.saveViewerCache(remote.payload_json, remote, State.activePeriodKey); }
+    catch (cacheError) { console.error('Cache Viewer gagal diperbarui:', cacheError); }
+    return { status: 'remote', periodKey: State.activePeriodKey };
   } catch (remoteError) {
     if (allowCache) {
       try {
-        const cached = await Storage.getViewerCache();
+        const cacheKey = requestedPeriod || newestPeriodKey(State.periods) || null;
+        const cached = await Storage.getViewerCache(cacheKey);
         if (cached && cached.payload) {
           await hydratePublishedPayload(cached.payload, cached.remoteMeta || {}, 'cache', cached.cachedAt);
-          State.remoteStatusMessage = 'Koneksi Supabase bermasalah. Menggunakan cache Viewer terakhir.';
-          return { status: 'cache', error: remoteError };
+          if (cacheKey) State.activePeriodKey = cacheKey;
+          State.remoteStatusMessage = cacheKey
+            ? `Koneksi Supabase bermasalah. Menggunakan cache Viewer ${periodMonthLabel(cacheKey)}.`
+            : 'Koneksi Supabase bermasalah. Menggunakan cache Viewer terakhir.';
+          return { status: 'cache', error: remoteError, periodKey: State.activePeriodKey };
         }
       } catch (cacheError) {
         console.error('Cache Viewer tidak dapat digunakan:', cacheError);
@@ -4859,8 +5297,10 @@ function publicDataBannerHtml() {
   const meta = State.remotePublication;
   const sourceText = meta.source === 'cache' ? 'Cache Viewer' : 'Supabase';
   const publishedText = meta.publishedAt ? fmtDateTimeId(Date.parse(meta.publishedAt)) : '-';
+  // Viewer hanya perlu tahu PERIODE dan STATUS-nya — revisi teknis tetap seperti sebelumnya.
+  const periodText = meta.periodKey ? `<strong>${escapeHtml(periodOptionLabel(meta.periodKey, meta.periodStatus))}</strong> · ` : '';
   return `<div class="public-data-banner ${meta.source === 'cache' ? 'cache-source' : ''}">
-    <div><strong>Data per ${fmtDateId(meta.cutoffDate)}</strong> · Publikasi Rev ${fmtNumber(meta.revisionNumber)}${meta.sourceRevisionNumber ? ` (Rev Data ${fmtNumber(meta.sourceRevisionNumber)})` : ''} · Dipublikasikan ${publishedText} · Sumber: ${sourceText}</div>
+    <div>${periodText}<strong>Data per ${fmtDateId(meta.cutoffDate)}</strong> · Publikasi Rev ${fmtNumber(meta.revisionNumber)}${meta.sourceRevisionNumber ? ` (Rev Data ${fmtNumber(meta.sourceRevisionNumber)})` : ''} · Dipublikasikan ${publishedText} · Sumber: ${sourceText}</div>
     ${State.remoteStatusMessage ? `<div>${escapeHtml(State.remoteStatusMessage)}</div>` : ''}
   </div>`;
 }
@@ -4871,11 +5311,39 @@ function tatLegacyBannerHtml() {
 async function refreshViewerData() {
   if (State.runtimeMode !== 'viewer') return;
   showLoadingOverlay('Mengambil data nasional terbaru...');
-  const result = await loadViewerNationalData({ allowCache: true });
+  const result = await loadViewerNationalData({ allowCache: true, periodKey: State.activePeriodKey });
   hideLoadingOverlay();
   renderSidebar();
   router();
   showToast(result.status === 'remote' ? 'Data nasional berhasil diperbarui.' : (result.status === 'cache' ? 'Supabase bermasalah. Cache terakhir tetap digunakan.' : State.remoteStatusMessage), result.status === 'remote' ? 'success' : 'info');
+}
+/**
+ * Berpindah periode. Official snapshot periode terpilih menjadi State.activeSnapshot,
+ * sehingga SELURUH engine existing (Dashboard, semua Ranking, Detail KPI, drill-down,
+ * Countif, sorting, filter, CSV, JPG) otomatis mengikuti — tidak ada ranking engine baru.
+ */
+async function setActivePeriod(periodKey) {
+  const key = normalizePeriodKeyValue(periodKey);
+  if (!key || key === State.activePeriodKey || State.periodBusy) return;
+  State.periodBusy = true;
+  showLoadingOverlay(`Memuat data ${periodMonthLabel(key)}...`);
+  try {
+    const result = await loadViewerNationalData({ allowCache: true, periodKey: key });
+    if (result.status === 'error') {
+      showToast(State.remoteStatusMessage || `Data ${periodMonthLabel(key)} tidak dapat dimuat.`, 'error');
+    } else if (result.status === 'cache') {
+      showToast(`Supabase bermasalah. Menampilkan cache ${periodMonthLabel(key)}.`, 'info');
+    } else {
+      showToast(`Periode aktif: ${activePeriodLabel()}.`, 'success');
+    }
+  } catch (error) {
+    showToast(safeUserError(error, `Data ${periodMonthLabel(key)} tidak dapat dimuat.`), 'error');
+  } finally {
+    State.periodBusy = false;
+    hideLoadingOverlay();
+    renderSidebar();
+    router();
+  }
 }
 function openAdminLoginModal() {
   if (!State.supabaseReady) {
@@ -4958,12 +5426,32 @@ async function openPublishNationalDialog() {
   if (!regionOptions.length) { showToast('Snapshot aktif tidak memiliki data Regional.', 'error'); return; }
 
   showLoadingOverlay('Memeriksa revisi publikasi...');
+  const publishPeriodKey = snapshotPeriodKey(State.activeSnapshot);
+  const publishPeriodStatus = snapshotPeriodStatus(State.activeSnapshot);
+  if (!publishPeriodKey) { hideLoadingOverlay(); showToast('Periode snapshot aktif tidak dapat ditentukan. Upload ulang data dengan tanggal yang valid.', 'error'); return; }
+  // TAT Closing wajib 100% — dicek lagi di sini agar publish tidak pernah lolos lewat UI.
+  // Database tetap menjadi penjaga terakhir (publish_period_snapshot_v1).
+  if (publishPeriodStatus === PERIOD_STATUS_CLOSING && !isClosingTatValue(State.activeSnapshot.tatMtd)) {
+    hideLoadingOverlay();
+    showToast(`Publikasi Closing diblokir: TAT snapshot ${fmtPercent(State.activeSnapshot.tatMtd, 2)} — Closing wajib 100%.`, 'error');
+    return;
+  }
   let comparisonCandidate = null;
   let publicationRevision = null;
   try {
-    comparisonCandidate = await fetchPublishComparisonCandidate();
+    await refreshOfficialPeriods();
+    // Kunci Closing -> MTD juga diperiksa di UI (official + local) agar pesannya jelas
+    // sebelum dialog dibuka. Database tetap menjadi penjaga terakhir.
+    if (publishPeriodStatus === PERIOD_STATUS_MTD && periodHasClosing(publishPeriodKey)) {
+      throw new Error(`${periodMonthLabel(publishPeriodKey)} sudah Closing dan tidak dapat kembali ke MTD.`);
+    }
+    // PEMBANDING WAJIB dari periode yang sama (bukan dari global is_active).
+    comparisonCandidate = await fetchPublishComparisonCandidate(publishPeriodKey);
     // Angka Revisi Publikasi TIDAK PERNAH ditebak: selalu dari database (MAX + 1).
-    publicationRevision = await getNextPublicationRevision(State.activeSnapshot.cutoffDate);
+    // Untuk mode period, angka ini hanya PREVIEW — backend yang menentukan nilai final.
+    publicationRevision = State.periodFeatureReady
+      ? await getNextPeriodPublicationRevision(publishPeriodKey)
+      : await getNextPublicationRevision(State.activeSnapshot.cutoffDate);
   } catch (error) {
     hideLoadingOverlay();
     showToast(safeUserError(error, 'Revisi publikasi terbaru tidak dapat diperiksa.'), 'error');
@@ -4974,7 +5462,7 @@ async function openPublishNationalDialog() {
   const selected = new Set(regionOptions.map(option => option.value));
   let previewPayload = null;
 
-  const overlay = openModal(`<div class="detail-header"><h2>Publikasikan Data Nasional</h2><div class="detail-sub">Pilih Regional yang boleh dikirim ke Viewer, lalu periksa ringkasan sebelum mengganti data aktif Viewer.</div></div>
+  const overlay = openModal(`<div class="detail-header"><h2>Publikasikan Data Nasional</h2><div class="detail-sub">Periode <strong>${escapeHtml(periodOptionLabel(publishPeriodKey, publishPeriodStatus))}</strong>. Pilih Regional yang boleh dikirim ke Viewer, lalu periksa ringkasan sebelum mengganti data resmi periode ini.</div></div>
     <div class="publish-scope-section">
       <div class="publish-scope-head">
         <h3>Cakupan Publikasi Regional</h3>
@@ -5016,9 +5504,11 @@ async function openPublishNationalDialog() {
       previewPayload = buildPublishedPayloadForScope(selected, comparisonCandidate, publicationRevision);
       const p = buildPublishScopePreview(previewPayload, toRegionKeySet(selected));
       previewEl.innerHTML = [
+        row('Periode', `<strong>${escapeHtml(periodMonthLabel(previewPayload.metadata.periodKey))}</strong>`),
+        row('Jenis Data', `<strong>${escapeHtml(periodStatusLabel(previewPayload.metadata.periodStatus))}</strong>`),
         row('Tanggal Data', escapeHtml(fmtDateId(previewPayload.metadata.cutoffDate))),
         row('Revisi Data', fmtNumber(previewPayload.metadata.sourceRevisionNumber)),
-        row('Revisi Publikasi', `<strong>${fmtNumber(previewPayload.metadata.revisionNumber)}</strong>`),
+        row('Revisi Publikasi', `<strong>${fmtNumber(previewPayload.metadata.revisionNumber)}</strong>${State.periodFeatureReady ? ' <span class="muted">(nomor final ditetapkan server)</span>' : ''}`),
         row('File sumber', escapeHtml(previewPayload.metadata.fileName)),
         row('Regional', `${fmtNumber(p.regionPublic)} / ${fmtNumber(p.regionSource)}`),
         row('Salesman', `${fmtNumber(p.salesmanPublic)} / ${fmtNumber(p.salesmanSource)}`),
@@ -5086,7 +5576,9 @@ async function openPublishNationalDialog() {
     // GUARD TERHADAP STALE UI/REVISI: payload FINAL SELALU dibangun ulang dari checkbox terkini
     // DAN Revisi Publikasi di-query ulang (session/admin lain bisa saja sudah publish sejak modal dibuka).
     const buildFinalPayload = async () => {
-      const freshRevision = await getNextPublicationRevision(State.activeSnapshot.cutoffDate);
+      const freshRevision = State.periodFeatureReady
+        ? await getNextPeriodPublicationRevision(publishPeriodKey)
+        : await getNextPublicationRevision(State.activeSnapshot.cutoffDate);
       publicationRevision = freshRevision;
       const finalPayload = buildPublishedPayloadForScope(finalSelection, comparisonCandidate, freshRevision);
       validatePublishedPayload(finalPayload);
@@ -5103,21 +5595,41 @@ async function openPublishNationalDialog() {
         confirmBtn.textContent = originalLabel;
         return;
       }
-      let snapshotId;
+      let snapshotId = '';
+      let publishedRevision = payload.metadata.revisionNumber;
+      // JALUR PERIOD: revisi publikasi dan normalisasi metadata payload dilakukan BACKEND
+      // secara atomic (advisory lock per periode), sehingga tidak perlu retry duplikat.
+      const publishOnce = async currentPayload => {
+        if (State.periodFeatureReady && typeof window.SupabaseService.publishPeriodSnapshot === 'function') {
+          const result = await window.SupabaseService.publishPeriodSnapshot(currentPayload, {
+            ...currentPayload.metadata,
+            periodKey: publishPeriodKey,
+            periodStatus: publishPeriodStatus,
+            dataSchemaVersion: currentPayload.schemaVersion
+          });
+          return { id: result.publicationId, revision: result.periodRevisionNumber };
+        }
+        const id = await window.SupabaseService.publishNationalSnapshot(currentPayload, currentPayload.metadata);
+        return { id, revision: currentPayload.metadata.revisionNumber };
+      };
       try {
-        snapshotId = await window.SupabaseService.publishNationalSnapshot(payload, payload.metadata);
+        const result = await publishOnce(payload);
+        snapshotId = result.id; publishedRevision = result.revision;
       } catch (error) {
-        // SATU retry aman KHUSUS bentrok UNIQUE(cutoff_date, revision_number) akibat race condition:
+        // SATU retry aman KHUSUS bentrok UNIQUE akibat race condition (relevan pada jalur legacy):
         // ambil revisi terbaru lagi, bangun ulang payload, coba sekali. Tidak pernah menimpa/menghapus
         // publikasi lama dan tidak pernah retry berulang.
         if (!isDuplicateRevisionError(error)) throw error;
         const retryPayload = await buildFinalPayload();
-        snapshotId = await window.SupabaseService.publishNationalSnapshot(retryPayload, retryPayload.metadata);
+        const result = await publishOnce(retryPayload);
+        snapshotId = result.id; publishedRevision = result.revision;
         payload = retryPayload;
       }
-      State.remotePublication = normalizeRemotePublication(await window.SupabaseService.getActivePublishedSnapshot(), 'supabase');
+      // Setelah publish, muat ulang daftar periode dan tampilkan periode yang baru dipublikasikan.
+      await refreshOfficialPeriods();
+      State.activePeriodKey = publishPeriodKey;
       overlay.querySelector('[data-act="close"]').click();
-      showToast(`Publikasi berhasil — Rev Publikasi ${fmtNumber(payload.metadata.revisionNumber)} (${fmtNumber(payload.metadata.publishScope.includedRegionCount)} Regional). Snapshot ID: ${snapshotId}`, 'success');
+      showToast(`Publikasi ${periodOptionLabel(publishPeriodKey, publishPeriodStatus)} berhasil — Rev Publikasi ${fmtNumber(publishedRevision)} (${fmtNumber(payload.metadata.publishScope.includedRegionCount)} Regional). ID: ${snapshotId}`, 'success');
       renderTopbar(parseHash().path, parseHash().params);
     } catch (error) {
       errorEl.textContent = safeUserError(error, 'Publikasi gagal.');
@@ -5137,35 +5649,59 @@ async function wirePublicationHistoryPage() {
   if (!requireAdmin('melihat riwayat publikasi')) return;
   const container = document.getElementById('publication-history-content');
   try {
-    const rows = await window.SupabaseService.getPublishedSnapshotHistory(25);
+    // Riwayat memakai API period bila tersedia (menampilkan Periode + Jenis Data + Rev Periode),
+    // dan jatuh ke API lama bila migration period belum diterapkan.
+    let rows = [];
+    let periodMode = false;
+    if (window.SupabaseService && typeof window.SupabaseService.getPeriodPublicationHistory === 'function') {
+      try { rows = await window.SupabaseService.getPeriodPublicationHistory(null, 50); periodMode = true; }
+      catch (periodError) { if (!isPeriodFeatureMissingError(periodError)) throw periodError; }
+    }
+    if (!periodMode) {
+      rows = (await window.SupabaseService.getPublishedSnapshotHistory(25)).map(row => ({
+        id: row.id, cutoffDate: row.cutoff_date, revisionNumber: row.revision_number,
+        publishedAt: row.published_at, fileName: row.file_name, recordCount: row.record_count,
+        eligibleCount: row.eligible_count, isActive: row.is_active === true, isPeriodCurrent: row.is_active === true,
+        periodKey: periodKeyFromCutoffDate(row.cutoff_date), periodStatus: PERIOD_STATUS_MTD, periodRevisionNumber: null
+      }));
+    }
     if (!rows.length) {
       container.innerHTML = '<div class="empty-state"><h2>Belum Ada Publikasi</h2><p>Publikasikan snapshot lokal pertama Anda.</p></div>';
       return;
     }
     container.innerHTML = `<div class="dt-scroll"><table class="dt-table"><thead><tr>
-      <th>Cutoff</th><th>Rev Publikasi</th><th>Dipublikasikan</th><th>File</th><th>Record</th><th>Eligible</th><th>Status</th><th>Aksi</th>
+      <th>Periode</th><th>Jenis</th><th>Cutoff</th><th>Rev Publikasi</th><th>Dipublikasikan</th><th>File</th><th>Record</th><th>Eligible</th><th>Status</th><th>Aksi</th>
       </tr></thead><tbody>${rows.map(row => `<tr>
-        <td>${fmtDateId(row.cutoff_date)}</td><td>${fmtNumber(row.revision_number)}</td><td>${fmtDateTimeId(Date.parse(row.published_at))}</td>
-        <td>${escapeHtml(row.file_name || '-')}</td><td>${fmtNumber(row.record_count)}</td><td>${fmtNumber(row.eligible_count)}</td>
-        <td>${row.is_active ? '<span class="badge cat-perfect">Aktif</span>' : '<span class="badge badge-muted">Tidak Aktif</span>'}</td>
-        <td><div class="publication-history-actions">${row.is_active ? '-' : `<button class="btn btn-xs btn-outline activate-publication" data-id="${escapeHtml(row.id)}">Aktifkan Kembali</button>`}</div></td>
+        <td>${escapeHtml(periodMonthLabel(row.periodKey))}</td>
+        <td>${escapeHtml(periodStatusLabel(row.periodStatus) || '-')}</td>
+        <td>${fmtDateId(row.cutoffDate)}</td>
+        <td>${fmtNumber(row.periodRevisionNumber || row.revisionNumber)}</td>
+        <td>${fmtDateTimeId(Date.parse(row.publishedAt))}</td>
+        <td>${escapeHtml(row.fileName || '-')}</td><td>${fmtNumber(row.recordCount)}</td><td>${fmtNumber(row.eligibleCount)}</td>
+        <td>${row.isPeriodCurrent ? '<span class="badge cat-perfect">Resmi Periode</span>' : '<span class="badge badge-muted">Arsip</span>'}${row.isActive ? ' <span class="badge badge-muted">Default Global</span>' : ''}</td>
+        <td><div class="publication-history-actions">${row.isPeriodCurrent ? '-' : `<button class="btn btn-xs btn-outline activate-publication" data-id="${escapeHtml(row.id)}" data-period="${escapeHtml(row.periodKey || '')}">Jadikan Resmi</button>`}</div></td>
       </tr>`).join('')}</tbody></table></div>`;
     container.querySelectorAll('.activate-publication').forEach(button => button.addEventListener('click', () => {
       const snapshotId = button.dataset.id;
-      showConfirmDialog('Aktifkan kembali snapshot ini sebagai data nasional aktif?', async () => {
+      const rowPeriod = button.dataset.period || '';
+      const message = periodMode
+        ? `Jadikan publikasi ini sebagai dataset resmi untuk ${periodMonthLabel(rowPeriod)}? Publikasi resmi periode lain tidak terpengaruh.`
+        : 'Aktifkan kembali snapshot ini sebagai data nasional aktif?';
+      showConfirmDialog(message, async () => {
         if (!requireAdmin('rollback publikasi')) return;
         showLoadingOverlay('Mengaktifkan snapshot publikasi...');
         try {
-          await window.SupabaseService.activatePublishedSnapshot(snapshotId);
-          State.remotePublication = normalizeRemotePublication(await window.SupabaseService.getActivePublishedSnapshot(), 'supabase');
+          if (periodMode) await window.SupabaseService.activatePeriodSnapshot(snapshotId);
+          else await window.SupabaseService.activatePublishedSnapshot(snapshotId);
+          await refreshOfficialPeriods();
           hideLoadingOverlay();
-          showToast('Snapshot publikasi berhasil diaktifkan kembali.', 'success');
+          showToast('Snapshot publikasi berhasil dijadikan dataset resmi.', 'success');
           router();
         } catch (error) {
           hideLoadingOverlay();
           showToast(safeUserError(error, 'Rollback gagal.'), 'error');
         }
-      }, { confirmLabel: 'Ya, Aktifkan Kembali' });
+      }, { confirmLabel: 'Ya, Lanjutkan' });
     }));
   } catch (error) {
     container.innerHTML = `<div class="alert alert-error">${escapeHtml(safeUserError(error, 'Riwayat publikasi gagal dimuat.'))}</div>`;
@@ -5364,6 +5900,7 @@ function openActiveDataPopover(button) {
     <div class="topbar-data-popover-title">Data yang Sedang Digunakan</div>
     <div class="topbar-data-popover-grid">
       <div class="topbar-data-popover-label">File</div><div class="topbar-data-popover-value">${escapeHtml(snapshot.fileName || '-')}</div>
+      <div class="topbar-data-popover-label">Periode</div><div class="topbar-data-popover-value">${escapeHtml(periodOptionLabel(snapshotPeriodKey(snapshot), snapshotPeriodStatus(snapshot)))}</div>
       <div class="topbar-data-popover-label">Tanggal data</div><div class="topbar-data-popover-value">${fmtDateId(snapshot.cutoffDate)}</div>
       <div class="topbar-data-popover-label">Revisi Data</div><div class="topbar-data-popover-value">${fmtNumber(snapshot.revisionNumber || 1)}</div>
       <div class="topbar-data-popover-label">Waktu upload</div><div class="topbar-data-popover-value">${fmtDateTimeId(snapshot.uploadedAt)}</div>
@@ -5599,6 +6136,136 @@ async function setActiveStatusSalesmanFilter(statuses) {
   router();
   showToast(`Status Salesman: ${statusSalesmanFilterLabel()}.`, 'success');
 }
+/* ------------------------------------------------------------
+   PERIODE LOKAL ADMIN (workspace IndexedDB)
+   ------------------------------------------------------------
+   Terpisah tegas dari periode Viewer:
+     ADMIN  -> State.snapshotList (lokal, boleh berisi revisi yang BELUM dipublish)
+     VIEWER -> State.periods (official/current dari Supabase)
+
+   Untuk setiap bulan diambil SATU snapshot lokal: REVISI DATA TERBARU.
+   Karena Revisi Data kini sequential per bulan, "terbaru" = revisionNumber terbesar,
+   dengan uploadedAt sebagai tie-break. Label bulan mengikuti status snapshot tersebut,
+   sehingga hanya ada satu entri per bulan (bukan "Agustus MTD" + "Agustus Closing").
+   ------------------------------------------------------------ */
+function latestLocalSnapshotForPeriod(periodKey) {
+  const candidates = localSnapshotsForPeriod(periodKey);
+  if (!candidates.length) return null;
+  return candidates.slice().sort((a, b) => {
+    const revDiff = getSnapshotRevisionNumber(b) - getSnapshotRevisionNumber(a);
+    if (revDiff) return revDiff;
+    return snapshotUploadedAtValue(b) - snapshotUploadedAtValue(a);
+  })[0];
+}
+function adminLocalPeriodOptions() {
+  const snapshots = Array.isArray(State.snapshotList) ? State.snapshotList : [];
+  const keys = new Set();
+  snapshots.forEach(snapshot => {
+    const key = snapshotPeriodKeyForRevision(snapshot);
+    if (key) keys.add(key);
+  });
+  return [...keys]
+    .sort((a, b) => (a < b ? 1 : (a > b ? -1 : 0)))   // period_key TERBESAR lebih dulu
+    .map(periodKey => {
+      const snapshot = latestLocalSnapshotForPeriod(periodKey);
+      return snapshot ? {
+        periodKey,
+        periodStatus: normalizePeriodStatusValue(snapshot.periodStatus) || PERIOD_STATUS_MTD,
+        snapshot
+      } : null;
+    })
+    .filter(Boolean);
+}
+// Default Admin = period_key TERBESAR dari snapshot lokal, BUKAN uploadedAt terbaru.
+// Backfill Juni yang di-upload hari ini tidak menggeser default dari September.
+function defaultAdminPeriodKey() {
+  const options = adminLocalPeriodOptions();
+  return options.length ? options[0].periodKey : null;
+}
+/**
+ * Admin berpindah periode: memuat REVISI DATA LOKAL TERBARU bulan tersebut sebagai
+ * State.activeSnapshot, lalu membangun ulang validation/hierarchy/comparison/cache
+ * lewat loadSnapshotIntoState() existing. Tidak ada engine ranking baru, dan
+ * TIDAK PERNAH mengambil snapshot published Viewer.
+ */
+async function setActiveAdminPeriod(periodKey) {
+  const key = normalizePeriodKeyValue(periodKey);
+  if (!key || State.periodBusy) return;
+  const snapshot = latestLocalSnapshotForPeriod(key);
+  if (!snapshot) {
+    // Tidak mengarang data: periode tanpa snapshot lokal memang tidak ditawarkan.
+    showToast(`Belum ada data lokal untuk ${periodMonthLabel(key)}.`, 'error');
+    renderTopbar(parseHash().path, parseHash().params);
+    return;
+  }
+  if (State.activeSnapshot && State.activeSnapshot.id === snapshot.id) return;
+  State.periodBusy = true;
+  showLoadingOverlay(`Memuat data lokal ${periodMonthLabel(key)}...`);
+  try {
+    // Snapshot lokal dibaca ulang dari IndexedDB agar rawRecords lengkap
+    // (State.snapshotList bisa berisi entri ringkas dari listSnapshots()).
+    let full = snapshot;
+    if (!Array.isArray(full.rawRecords) || !full.rawRecords.length) {
+      const stored = await Storage.getSnapshot(snapshot.id);
+      if (stored) full = stored;
+    }
+    await loadSnapshotIntoState(full);
+    State.activePeriodKey = key;
+    showToast(`Periode aktif: ${periodOptionLabel(key, snapshotPeriodStatus(full))} (Rev Data ${fmtNumber(getSnapshotRevisionNumber(full))}).`, 'success');
+  } catch (error) {
+    showToast(safeUserError(error, `Data lokal ${periodMonthLabel(key)} tidak dapat dimuat.`), 'error');
+  } finally {
+    State.periodBusy = false;
+    hideLoadingOverlay();
+    renderSidebar();
+    router();
+  }
+}
+
+/* ------------------------------------------------------------
+   PERIOD SELECTOR (topbar)
+   ------------------------------------------------------------
+   SATU ITEM PER BULAN — yang ditampilkan adalah official/current dataset bulan itu.
+   "Agustus MTD" dan "Agustus Closing" TIDAK PERNAH muncul sebagai dua pilihan.
+   SCOPE-nya terpisah dari GLOBAL FILTER (Phase/Regional/Status) dan dari PUBLISH SCOPE.
+   ------------------------------------------------------------ */
+function periodSelectorHtml() {
+  // MODE ADMIN: sumbernya adalah WORKSPACE LOKAL Admin (IndexedDB), satu item per bulan,
+  // memakai REVISI DATA LOKAL TERBARU bulan tersebut. Data published Viewer TIDAK PERNAH
+  // dicampur ke sini, dan sebaliknya revisi lokal yang belum dipublish tidak pernah
+  // bocor ke Viewer.
+  if (State.runtimeMode === 'admin') {
+    const localOptions = adminLocalPeriodOptions();
+    if (!localOptions.length) return '';
+    const activeKey = snapshotPeriodKey(State.activeSnapshot) || localOptions[0].periodKey;
+    const disabled = State.periodBusy ? ' disabled' : '';
+    return `<div class="topbar-period-filter">
+      <label class="topbar-period-label" for="topbar-period-select">Periode:</label>
+      <select class="topbar-period-select" id="topbar-period-select" title="Periode workspace lokal Admin — revisi data lokal terbaru per bulan"${disabled}>
+        ${localOptions.map(option => `<option value="${escapeHtml(option.periodKey)}"${option.periodKey === activeKey ? ' selected' : ''}>${escapeHtml(periodOptionLabel(option.periodKey, option.periodStatus))}</option>`).join('')}
+      </select>
+    </div>`;
+  }
+  const options = sortPeriodsNewestFirst(State.periods);
+  const activeKey = State.activePeriodKey || (State.remotePublication && State.remotePublication.periodKey) || '';
+  // Periode yang sedang dilihat wajib ada di daftar walau daftar resmi gagal diambil,
+  // supaya selector tidak pernah menampilkan bulan yang berbeda dari data yang dirender.
+  if (activeKey && !options.some(option => option.periodKey === activeKey)) {
+    options.unshift({
+      periodKey: activeKey,
+      periodStatus: (State.remotePublication && State.remotePublication.periodStatus) || snapshotPeriodStatus(State.activeSnapshot)
+    });
+    sortPeriodsNewestFirst(options);
+  }
+  if (!options.length) return '';
+  const disabled = State.periodBusy ? ' disabled' : '';
+  return `<div class="topbar-period-filter">
+    <label class="topbar-period-label" for="topbar-period-select">Periode:</label>
+    <select class="topbar-period-select" id="topbar-period-select" title="Satu bulan = satu dataset resmi"${disabled}>
+      ${options.map(option => `<option value="${escapeHtml(option.periodKey)}"${option.periodKey === activeKey ? ' selected' : ''}>${escapeHtml(periodOptionLabel(option.periodKey, option.periodStatus))}</option>`).join('')}
+    </select>
+  </div>`;
+}
 function renderTopbar(path, params) {
   closeActiveDataPopover();
   closeStatusSalesmanPopover();
@@ -5618,6 +6285,7 @@ function renderTopbar(path, params) {
       <div class="topbar-title">${escapeHtml(PAGE_TITLES[path] || 'Dashboard')}</div>
       <div class="breadcrumb">${crumbs.map((c, i) => c.link && i < crumbs.length - 1 ? `<a href="#${c.link}">${escapeHtml(c.label)}</a>` : `<span>${escapeHtml(c.label)}</span>`).join(' &rsaquo; ')}</div>
     </div>
+    ${periodSelectorHtml()}
     ${dataSummary ? `<button type="button" class="topbar-data-summary" id="topbar-data-summary" aria-expanded="false"><span class="dot"></span>${escapeHtml(dataSummary)}</button>` : ''}
     ${showPhaseFilter ? `
       <div class="topbar-phase-filter">
@@ -5658,6 +6326,12 @@ function renderTopbar(path, params) {
   if (regionBtn) regionBtn.addEventListener('click', (event) => { event.stopPropagation(); if (document.getElementById('topbar-global-multi-popover') && regionBtn.getAttribute('aria-expanded') === 'true') { closeGlobalMultiPopover(); return; } openGlobalRegionFilterPopover(regionBtn); });
   const statusBtn = document.getElementById('topbar-status-btn');
   if (statusBtn) statusBtn.addEventListener('click', (event) => { event.stopPropagation(); openStatusSalesmanPopover(statusBtn); });
+  const periodSelect = document.getElementById('topbar-period-select');
+  if (periodSelect) periodSelect.addEventListener('change', event => {
+    // ADMIN -> workspace lokal; VIEWER -> official published. Dua jalur terpisah.
+    if (State.runtimeMode === 'admin') setActiveAdminPeriod(event.target.value);
+    else setActivePeriod(event.target.value);
+  });
 }
 
 /* ============================================================
@@ -5967,13 +6641,24 @@ function formatTatTodayPercent(value) {
   if (!Number.isFinite(numeric)) return '-';
   return fmtPercent(numeric, Number.isInteger(numeric) ? 0 : 2);
 }
+/**
+ * Label TAT mengikuti STATUS PERIODE snapshot yang sedang dilihat:
+ *   MTD     -> "TAT Hari Ini: xx% / xx HK"
+ *   CLOSING -> "TAT Closing: 100% / xx HK"
+ * Angka TAT dan HK TETAP dari sumber existing (snapshot.tatMtd & workdayMtd/G2).
+ * Tidak ada perhitungan baru dan tidak ada angka yang dikarang — hanya labelnya yang berbeda.
+ */
+function tatTodayLabelPrefix(snapshot) {
+  return isClosingPeriodSnapshot(snapshot === undefined ? State.activeSnapshot : snapshot)
+    ? 'TAT Closing' : 'TAT Hari Ini';
+}
 function tatTodayLabelText(snapshot) {
   const snap = snapshot || State.activeSnapshot;
   if (!snap) return '';
   const tat = isValidTatMtdValue(snap.tatMtd) ? Number(snap.tatMtd) : null;
   if (tat === null) return '';
   const workday = activeSnapshotWorkdayMtd(snap);
-  return `TAT Hari Ini: ${formatTatTodayPercent(tat)} / ${workday === null ? '-' : fmtNumber(workday, 0)} HK`;
+  return `${tatTodayLabelPrefix(snap)}: ${formatTatTodayPercent(tat)} / ${workday === null ? '-' : fmtNumber(workday, 0)} HK`;
 }
 function tatTodayInfoHtml() {
   const text = tatTodayLabelText();
@@ -8647,8 +9332,16 @@ function renderUploadBaruTab() {
       </div>
       <div class="upload-form-row">
         <label>Tanggal / Cut-off Data:<input type="date" id="cutoff-date-input" value="${new Date().toISOString().slice(0, 10)}" /></label>
+        <!-- PERIODE selalu diturunkan dari cut-off date, TIDAK PERNAH dari bulan browser,
+             agar backfill bulan lama tidak salah label. Field ini read-only sebagai konfirmasi. -->
+        <label>Periode (YYYY-MM):<input type="month" id="period-month-input" readonly title="Periode mengikuti Tanggal / Cut-off Data" /></label>
+        <label>Jenis Data:<select id="period-status-input">
+          <option value="MTD" selected>MTD</option>
+          <option value="CLOSING">Closing</option>
+        </select></label>
         <label>Catatan Upload (opsional):<input type="text" id="upload-note-input" placeholder="mis. update harian closing" /></label>
       </div>
+      <div id="period-status-hint" class="upload-period-hint"></div>
       <button class="btn btn-ghost" id="download-template-btn">📄 Panduan Struktur Data</button>
       <div id="upload-preview-area"></div>
     </div>`;
@@ -8665,6 +9358,7 @@ function wireUploadPage(params) {
     dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
     dropzone.addEventListener('drop', (e) => { e.preventDefault(); dropzone.classList.remove('drag-over'); if (e.dataTransfer.files[0]) handleFileSelected(e.dataTransfer.files[0]); });
     document.getElementById('download-template-btn').addEventListener('click', downloadStructureGuide);
+    wireUploadPeriodFields();
   } else if (tab === 'master-cabang') {
     const dropzone = document.getElementById('master-cabang-dropzone'), fileInput = document.getElementById('master-cabang-file-input');
     document.getElementById('master-cabang-choose-btn').addEventListener('click', () => fileInput.click());
@@ -8675,6 +9369,60 @@ function wireUploadPage(params) {
   } else renderRiwayatTable();
 }
 
+/* ------------------------------------------------------------
+   FIELD PERIODE PADA ADMIN UPLOAD
+   ------------------------------------------------------------
+   - Periode SELALU = bulan dari Tanggal/Cut-off Data (bukan bulan browser).
+   - Jenis Data MTD/Closing dipilih Admin secara eksplisit.
+   - Bila periode tersebut SUDAH pernah Closing, opsi MTD dikunci di UI. Kunci
+     sebenarnya tetap di database (trigger + RPC) — UI hanya memberi tahu lebih awal.
+   ------------------------------------------------------------ */
+function uploadPeriodStatusValue() {
+  const el = document.getElementById('period-status-input');
+  return normalizePeriodStatusValue(el && el.value) || PERIOD_STATUS_MTD;
+}
+function syncUploadPeriodFields() {
+  const cutoffEl = document.getElementById('cutoff-date-input');
+  const monthEl = document.getElementById('period-month-input');
+  const statusEl = document.getElementById('period-status-input');
+  const hintEl = document.getElementById('period-status-hint');
+  if (!cutoffEl || !monthEl || !statusEl) return;
+  const periodKey = periodKeyFromCutoffDate(cutoffEl.value);
+  monthEl.value = periodKey;
+  const mtdOption = statusEl.querySelector('option[value="MTD"]');
+  const locked = !!periodKey && periodIsAlreadyClosing(periodKey);
+  if (mtdOption) mtdOption.disabled = locked;
+  if (locked && normalizePeriodStatusValue(statusEl.value) === PERIOD_STATUS_MTD) statusEl.value = PERIOD_STATUS_CLOSING;
+  if (!hintEl) return;
+  if (!periodKey) {
+    hintEl.className = 'upload-period-hint warn';
+    hintEl.textContent = 'Tanggal / Cut-off Data belum valid, sehingga periode belum dapat ditentukan.';
+    return;
+  }
+  const status = uploadPeriodStatusValue();
+  if (locked) {
+    const source = periodClosingLockSource(periodKey) === 'local'
+      ? 'sudah tersimpan sebagai Closing di workspace lokal Admin (belum dipublikasikan)'
+      : 'sudah dipublikasikan sebagai Closing';
+    hintEl.className = 'upload-period-hint warn';
+    hintEl.textContent = `${periodMonthLabel(periodKey)} ${source}. Perbaikan hanya dapat dilakukan sebagai revisi Closing berikutnya — periode tidak dapat kembali ke MTD.`;
+  } else if (status === PERIOD_STATUS_CLOSING) {
+    hintEl.className = 'upload-period-hint';
+    hintEl.textContent = `Periode ${periodMonthLabel(periodKey)} akan disimpan sebagai Closing. TAT pada file sumber wajib 100% — angka TAT tidak akan diubah oleh sistem.`;
+  } else {
+    hintEl.className = 'upload-period-hint';
+    hintEl.textContent = `Periode ${periodMonthLabel(periodKey)} akan disimpan sebagai MTD.`;
+  }
+}
+function wireUploadPeriodFields() {
+  const cutoffEl = document.getElementById('cutoff-date-input');
+  const statusEl = document.getElementById('period-status-input');
+  if (cutoffEl) cutoffEl.addEventListener('change', () => { syncUploadPeriodFields(); renderUploadPreview(); });
+  if (statusEl) statusEl.addEventListener('change', () => { syncUploadPeriodFields(); renderUploadPreview(); });
+  // Daftar periode resmi dibutuhkan untuk mengunci MTD setelah Closing.
+  refreshOfficialPeriods().then(syncUploadPeriodFields).catch(() => syncUploadPeriodFields());
+  syncUploadPeriodFields();
+}
 async function handleMasterCabangFileSelected(file) {
   if (!requireAdmin('mengunggah Master Cabang')) return;
   const previewArea = document.getElementById('master-cabang-preview-area');
@@ -8909,9 +9657,10 @@ function renderUploadPreview() {
         <tbody>${sampleRows.map(r => `<tr><td>${escapeHtml(r.kodeSalesman)}</td><td>${escapeHtml(r.namaSalesman)}</td><td>${escapeHtml(r.namaAss)}</td><td>${escapeHtml(r.depo)}</td><td>${escapeHtml(r.region)}</td>
           <td class="ta-right">${fmtPercent(r.pctAchScVsJks)}</td><td class="ta-right">${fmtPercent(r.pctAchGeofencing)}</td><td class="ta-right">${fmtRupiah(r.mtdOmsFm)}</td><td class="ta-right">${fmtPercent(r.tatMtd)}</td></tr>`).join('')}</tbody>
       </table></div>
+      ${closingTatBlockHtml(tatValidation)}
       <div class="upload-actions">
         <button class="btn btn-ghost" id="cancel-upload-btn">Batalkan</button>
-        <button class="btn btn-primary" id="confirm-upload-btn" ${tatValidation.valid ? '' : 'disabled'}>Simpan dan Gunakan Data</button>
+        <button class="btn btn-primary" id="confirm-upload-btn" ${tatValidation.valid && isUploadPeriodStatusAllowed(tatValidation) ? '' : 'disabled'}>Simpan dan Gunakan Data</button>
       </div>
     </div>`;
   document.getElementById('cancel-upload-btn').addEventListener('click', () => { State.uploadPreview = null; previewArea.innerHTML = ''; document.getElementById('file-input').value = ''; });
@@ -8919,19 +9668,55 @@ function renderUploadPreview() {
 }
 function statInfo(label, value) { return `<div class="stat-card static"><div class="stat-value" style="font-size:16px">${escapeHtml(String(value))}</div><div class="stat-label">${label}</div></div>`; }
 
+/* TAT CLOSING WAJIB 100% (validasi SOURCE — angka TAT tidak pernah dipaksa menjadi 100).
+   ADMIN UPLOAD VALIDATION untuk TAT tetap tampil penuh seperti sebelumnya; blok ini
+   hanya menambahkan syarat tambahan khusus status Closing. */
+function isUploadPeriodStatusAllowed(tatValidation) {
+  if (uploadPeriodStatusValue() !== PERIOD_STATUS_CLOSING) return true;
+  return !!(tatValidation && tatValidation.valid && isClosingTatValue(tatValidation.tatMtd));
+}
+function closingTatBlockHtml(tatValidation) {
+  if (uploadPeriodStatusValue() !== PERIOD_STATUS_CLOSING) return '';
+  if (!tatValidation || !tatValidation.valid) return '';
+  if (isClosingTatValue(tatValidation.tatMtd)) {
+    return `<div class="alert alert-info"><strong>Closing siap disimpan.</strong> TAT pada file sumber ${escapeHtml(fmtPercent(tatValidation.tatMtd, 0))} sesuai syarat Closing (100%).</div>`;
+  }
+  return `<div class="alert alert-error"><strong>Closing diblokir.</strong> TAT pada file sumber menunjukkan ${escapeHtml(fmtPercent(tatValidation.tatMtd, 2))}, sedangkan data Closing wajib 100%. Perbaiki file sumber — sistem tidak akan mengubah angka TAT menjadi 100.</div>`;
+}
+
 async function confirmSaveSnapshot() {
   if (!requireAdmin('menyimpan snapshot lokal')) return;
   const up = State.uploadPreview;
   if (!up || !up.tatValidation || !up.tatValidation.valid) { showToast('TAT MTD belum valid. Perbaiki file sumber sebelum menyimpan.', 'error'); return; }
   const cutoffDate = document.getElementById('cutoff-date-input').value;
   const note = document.getElementById('upload-note-input').value;
+  // PERIODE: diturunkan dari cutoff date, bukan bulan browser.
+  const periodKey = periodKeyFromCutoffDate(cutoffDate);
+  if (!periodKey) { showToast('Tanggal / Cut-off Data belum valid sehingga periode tidak dapat ditentukan.', 'error'); return; }
+  const periodStatus = uploadPeriodStatusValue();
+  // CLOSING LOCK pada SAVE — memakai helper gabungan (official + local),
+  // sehingga Closing lokal yang belum dipublish pun sudah mengunci MTD.
+  if (periodStatus === PERIOD_STATUS_MTD && periodHasClosing(periodKey)) {
+    const source = periodClosingLockSource(periodKey) === 'local'
+      ? 'sudah tersimpan sebagai Closing di workspace lokal (belum dipublikasikan)'
+      : 'sudah Closing';
+    showToast(`${periodMonthLabel(periodKey)} ${source} dan tidak dapat kembali ke MTD. Simpan sebagai revisi Closing berikutnya.`, 'error');
+    return;
+  }
+  if (periodStatus === PERIOD_STATUS_CLOSING && !isClosingTatValue(up.tatValidation.tatMtd)) {
+    showToast(`TAT file sumber ${fmtPercent(up.tatValidation.tatMtd, 2)} — data Closing wajib TAT 100%. Angka TAT tidak akan diubah oleh sistem.`, 'error');
+    return;
+  }
   const existing = State.snapshotList.find(s => s.cutoffDate === cutoffDate);
 
   const proceed = async () => {
     const id = `${cutoffDate}__${Date.now()}`;
-    const revisionNumber = getNextLocalRevisionNumber(cutoffDate);
+    // Revisi Data sequential per PERIOD (bulan), bukan per cutoff date.
+    const revisionNumber = getNextLocalRevisionNumberForPeriod(periodKey);
     const snapshot = {
       id, cutoffDate, fileName: up.file.name, sheetName: up.parsed.sheetName, note, uploadedAt: Date.now(), isActive: true, revisionNumber,
+      // METADATA PERIODE pada snapshot lokal. Ikut tersimpan di IndexedDB dan ikut ke payload publish.
+      periodKey, periodStatus,
       dataSchemaVersion: APP_CONFIG.CURRENT_DATA_SCHEMA_VERSION,
       hitRateSourceKey: APP_CONFIG.CURRENT_HIT_RATE_SOURCE,
       hitRateSourceHeader: 'TOTAL CALL ESUITE',
@@ -8957,6 +9742,8 @@ async function confirmSaveSnapshot() {
 
       State.snapshotList = await Storage.listSnapshots();
       await loadSnapshotIntoState(activeAfterSave);
+      // Periode aktif Admin mengikuti snapshot yang baru saja disimpan & digunakan.
+      State.activePeriodKey = snapshotPeriodKey(activeAfterSave) || null;
       State.uploadPreview = null;
       renderSidebar();
       showToast('Data baru berhasil disimpan dan digunakan.', 'success');
@@ -9034,12 +9821,35 @@ function renderRiwayatTable() {
       { key: 'revisionNumber', label: 'Revisi Data', align: 'right', sortable: true, render: r => r.revisionNumber || 1 },
       { key: 'dataSchemaVersion', label: 'Struktur EC vs Call', sortable: true, render: r => isLegacyHitRateSnapshot(r) ? '<span class="badge cat-critical">Formula Lama</span>' : '<span class="badge cat-perfect">Total Call Esuite</span>' },
       { key: 'tatFormulaVersion', label: 'Formula TAT', sortable: true, render: r => isLegacyTatSnapshot(r) ? '<span class="badge cat-needimprove">Legacy</span>' : `<span class="badge cat-perfect">${fmtPercent(r.tatMtd)}</span>` },
-      { key: 'isActive', label: 'Status', sortable: true, render: r => r.isActive ? '<span class="badge cat-perfect">Sedang Digunakan</span>' : '<span class="badge badge-muted">Tersimpan</span>' },
-      { key: 'aksi', label: 'Aksi', sortable: false, excludeFromJpg: true, render: r => `<div class="row-actions">
+      // Periode + Jenis ditampilkan agar Admin dapat membedakan MTD dan Closing pada bulan yang sama.
+      { key: 'periodKey', label: 'Periode', sortable: true, render: r => escapeHtml(periodMonthLabel(snapshotPeriodKeyForRevision(r))) },
+      { key: 'periodStatus', label: 'Jenis', sortable: true, render: r => {
+        const status = snapshotPeriodStatus(r);
+        return status === PERIOD_STATUS_CLOSING
+          ? '<span class="badge cat-perfect">Closing</span>'
+          : '<span class="badge badge-muted">MTD</span>';
+      } },
+      { key: 'isActive', label: 'Status', sortable: true, render: r => r.isActive ? '<span class="badge cat-perfect">Sedang Digunakan</span>' : (isSnapshotActivationBlocked(r) ? '<span class="badge badge-muted">Arsip (Closing)</span>' : '<span class="badge badge-muted">Tersimpan</span>') },
+      { key: 'aksi', label: 'Aksi', sortable: false, excludeFromJpg: true, render: r => {
+        // HISTORY TIDAK PERNAH DIHAPUS — MTD lama tetap terlihat, dapat dilihat dan
+        // di-export untuk AUDIT. Yang dikunci hanya menjadikannya snapshot aktif,
+        // karena period tersebut sudah Closing (§9/§11).
+        const blocked = isSnapshotActivationBlocked(r);
+        const activateBtn = r.isActive ? ''
+          : (blocked
+            ? `<button class="btn btn-xs btn-primary act-activate" data-id="${r.id}" disabled title="${escapeHtml(snapshotActivationBlockReason(r))}">Gunakan Data Ini</button>`
+            : `<button class="btn btn-xs btn-primary act-activate" data-id="${r.id}">Gunakan Data Ini</button>`);
+        // Periode yang sudah Closing = audit trail: tombol Hapus TETAP TAMPIL namun
+        // disabled, dengan title yang menjelaskan alasannya kepada Admin.
+        const deleteBtn = isSnapshotDeleteBlocked(r)
+          ? `<button class="btn btn-xs btn-danger act-delete" data-id="${r.id}" disabled title="Periode sudah Closing. Riwayat tidak dapat dihapus.">Hapus</button>`
+          : `<button class="btn btn-xs btn-danger act-delete" data-id="${r.id}">Hapus</button>`;
+        return `<div class="row-actions">
           <button class="btn btn-xs btn-outline act-view" data-id="${r.id}">Lihat Ranking</button>
           <button class="btn btn-xs btn-outline act-export" data-id="${r.id}">Export</button>
-          ${!r.isActive ? `<button class="btn btn-xs btn-primary act-activate" data-id="${r.id}">Gunakan Data Ini</button>` : ''}
-          <button class="btn btn-xs btn-danger act-delete" data-id="${r.id}">Hapus</button></div>` }
+          ${activateBtn}
+          ${deleteBtn}</div>`;
+      } }
     ], data: State.snapshotList,
     jpgTitle: 'RIWAYAT UPLOAD', jpgFilename: 'Riwayat_Upload',
     jpgFilterSummary: () => (table.searchTerm ? [`Pencarian: ${table.searchTerm}`] : [])
@@ -9049,6 +9859,14 @@ function renderRiwayatTable() {
   document.getElementById('dt-riwayat').addEventListener('click', async (e) => {
     const id = e.target.dataset.id; if (!id) return;
     if (e.target.classList.contains('act-activate')) {
+      // BLOK EKSPLISIT, bukan hanya tombol disabled: klik terprogram / DOM yang
+      // dimanipulasi tetap tidak boleh menjadikan MTD lama sebagai snapshot aktif
+      // pada periode yang sudah Closing.
+      const candidate = (State.snapshotList || []).find(snapshot => snapshot && snapshot.id === id);
+      if (candidate && isSnapshotActivationBlocked(candidate)) {
+        showToast(snapshotActivationBlockReason(candidate), 'error');
+        return;
+      }
       showLoadingOverlay('Menggunakan data ini...');
       await Storage.setActiveSnapshot(id);
       const active = await Storage.getActiveSnapshot();
@@ -9077,7 +9895,24 @@ function renderRiwayatTable() {
         ranked.map(s => [s.rank, s.rec.kodeSalesman, s.rec.namaSalesman, s.rec.namaAss, s.rec.depo, s.rec.region, s.finalScore.toFixed(2), s.category.label]));
       showToast('Export hasil proses berhasil.', 'success');
     } else if (e.target.classList.contains('act-delete')) {
+      // RE-CHECK di handler, bukan hanya atribut disabled: event yang dipanggil
+      // manual atau DOM yang dimanipulasi tetap tidak boleh menghapus audit trail.
+      const target = (State.snapshotList || []).find(snapshot => snapshot && snapshot.id === id);
+      if (target && isSnapshotDeleteBlocked(target)) {
+        showToast(snapshotDeleteBlockReason(target), 'error');
+        return;
+      }
       showConfirmDialog(`Hapus data tanggal ${fmtDateId(id.split('__')[0])}? Tindakan ini tidak dapat dibatalkan.`, async () => {
+        // FRESH INDEXEDDB RE-CHECK tepat sebelum delete. State.snapshotList dapat stale
+        // bila tab lain menyimpan Closing setelah dialog dibuka. Hasil fresh read juga
+        // langsung menjadi cache State agar hanya ada satu source of truth di frontend.
+        const freshSnapshots = await Storage.listSnapshots();
+        State.snapshotList = freshSnapshots;
+        const current = freshSnapshots.find(snapshot => snapshot && snapshot.id === id) || target;
+        if (current && isSnapshotDeleteBlocked(current)) {
+          showToast(snapshotDeleteBlockReason(current), 'error');
+          return;
+        }
         await Storage.deleteSnapshot(id);
         State.snapshotList = await Storage.listSnapshots();
         if (State.activeSnapshot && State.activeSnapshot.id === id) { State.activeSnapshot = null; State.validation = null; State.hierarchy = null; }
@@ -9455,7 +10290,35 @@ async function initApp() {
       try {
         State.snapshotList = await Storage.listSnapshots();
         const active = await Storage.getActiveSnapshot();
-        if (active) await loadSnapshotIntoState(active);
+        // DEFAULT PERIODE ADMIN = period_key TERBESAR dari snapshot lokal, bukan
+        // snapshot dengan uploadedAt terbaru. Backfill Juni yang diunggah hari ini
+        // tidak boleh menjadikan Juni sebagai periode default saat aplikasi dibuka.
+        // Snapshot aktif tetap dipakai bila memang sudah berada pada periode terbaru.
+        // Daftar periode resmi diambil LEBIH DULU agar Closing lock official ikut
+        // diperhitungkan saat memilih snapshot awal.
+        try { await refreshOfficialPeriods(); }
+        catch (periodError) { console.error('Daftar periode resmi tidak dapat diambil:', periodError); }
+
+        const defaultPeriod = defaultAdminPeriodKey();
+        // Snapshot aktif yang tersimpan bisa berupa MTD lama pada periode yang kini sudah
+        // Closing (mis. ditandai aktif sebelum Closing disimpan). Membiarkannya membuat
+        // period selector menampilkan "Closing" sementara data yang dirender MTD.
+        const needsDefault = !active
+          || isSnapshotActivationBlocked(active)
+          || snapshotPeriodKeyForRevision(active) !== defaultPeriod;
+        let initial = active;
+        if (defaultPeriod && needsDefault) {
+          const latest = latestLocalSnapshotForPeriod(defaultPeriod);
+          if (latest) {
+            const stored = (Array.isArray(latest.rawRecords) && latest.rawRecords.length)
+              ? latest : await Storage.getSnapshot(latest.id);
+            if (stored) initial = stored;
+          }
+        }
+        if (initial) {
+          await loadSnapshotIntoState(initial);
+          State.activePeriodKey = snapshotPeriodKey(initial) || null;
+        }
       } catch (e) { console.error(e); showToast('Gagal memuat snapshot lokal Admin.', 'error'); }
     } else {
       State.runtimeMode = 'viewer';
