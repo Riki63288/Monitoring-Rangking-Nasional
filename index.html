@@ -142,7 +142,19 @@ body{margin:0;font-family:var(--font);background:var(--bg);color:var(--ink);min-
 .topbar-status-popover .status-opt-count{margin-left:auto;font-size:11px;font-weight:800;color:var(--ink-soft);}
 .topbar-status-popover .dt-filter-option{justify-content:space-between;}
 .topbar-vacant-warning{flex-basis:100%;order:99;background:#fdeceb;color:#b33327;border:1px solid #f3c8c4;border-radius:8px;padding:6px 12px;font-size:11.5px;font-weight:800;margin-top:8px;}
-@media (max-width:900px){.topbar-phase-filter{order:3;}.topbar-global-filter-btn{max-width:100%;}.topbar-period-filter{order:2;}.topbar-period-select{max-width:170px;}}
+/* TOPBAR 2 BARIS — pengelompokan eksplisit, BUKAN mengandalkan auto-wrap flex.
+   .topbar-controls adalah kolom; setiap baris adalah flex row tersendiri sehingga
+   Row 1 (Periode/Data/Phase/Regional) dan Row 2 (Status/Mode/Perbarui/Login) tidak
+   pernah saling tertukar berapa pun lebar viewport. Wrap hanya terjadi DI DALAM
+   satu baris. Warning VACANT tetap child langsung #topbar (flex-basis:100%;order:99)
+   sehingga selalu full-width di bawah kedua baris. */
+.topbar-controls{display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex:0 1 auto;min-width:0;}
+.topbar-controls-row{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;min-width:0;}
+/* Urutan sudah benar dari urutan DOM; order legacy dinetralkan agar tidak menggeser
+   anggota baris (mis. tombol Data melompat ke depan Periode di bawah 900px). */
+.topbar-controls-row > *{order:0;}
+@media (max-width:900px){.topbar-global-filter-btn{max-width:100%;}.topbar-period-select{max-width:170px;}}
+@media (max-width:760px){.topbar-controls{align-items:stretch;width:100%;flex-basis:100%;}.topbar-controls-row{justify-content:flex-start;}}
 .topbar-status .dot{width:7px;height:7px;border-radius:50%;background:var(--green);}
 
 .topbar-data-summary{
@@ -810,6 +822,31 @@ select:focus,input:focus{outline:2px solid var(--gold);outline-offset:1px;}
 .trend-loading{display:flex;align-items:center;justify-content:center;gap:10px;padding:42px 12px;color:var(--ink-soft);font-size:13px;}
 .trend-loading .loading-spinner{width:26px;height:26px;border-width:3px;}
 @media (max-width:640px){.modal-box.modal-trend-performance{padding:16px}.trend-control{align-items:flex-start;flex-direction:column}.trend-control select{width:100%;min-width:0}.trend-chart-wrap{height:240px;padding:8px}.trend-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+/* ===== TREND NASIONAL — trigger Summary Strip + modal analytics lebar =====
+   Trigger memakai <button> (bukan href palsu) tetapi mewarisi .summary-strip-item
+   agar visualnya menyatu dengan empat item statistik existing. */
+.summary-strip-action{background:none;border:none;font:inherit;cursor:pointer;color:var(--ink);}
+.summary-strip-action .summary-strip-icon{line-height:1;}
+.summary-strip-action .summary-strip-label{font-size:13px;font-weight:800;color:var(--navy);white-space:nowrap;}
+.summary-strip-action:focus-visible{outline:2px solid var(--gold);outline-offset:2px;background:var(--bg-soft);}
+.modal-box.modal-trend-national{max-width:min(1180px,calc(100vw - 40px));width:100%;padding:22px;}
+.modal-trend-national .trend-chart-wrap{height:330px;}
+.trend-national-context{display:flex;flex-wrap:wrap;gap:6px 8px;margin-top:9px;}
+.trend-national-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border-radius:999px;background:var(--bg-soft);border:1px solid var(--card-border);color:var(--ink-soft);font-size:10.5px;font-weight:800;}
+.trend-national-chip b{color:var(--navy);font-weight:900;}
+.trend-national-detail{margin-top:14px;}
+.trend-national-detail h3{margin:0 0 8px;color:var(--navy);font-size:12.5px;text-transform:uppercase;letter-spacing:.35px;}
+.trend-national-table-wrap{max-height:270px;overflow:auto;border:1px solid var(--card-border);border-radius:10px;}
+.trend-national-table{width:100%;border-collapse:separate;border-spacing:0;font-size:11.5px;white-space:nowrap;}
+.trend-national-table th{position:sticky;top:0;z-index:2;padding:8px;background:var(--navy);color:#fff;text-align:center;font-size:9.5px;text-transform:uppercase;letter-spacing:.2px;}
+.trend-national-table td{padding:7px 8px;border-bottom:1px solid var(--card-border);text-align:center;background:#fff;}
+.trend-national-table tbody tr:nth-child(even) td{background:#fafaf8;}
+.trend-national-table .trend-national-period{text-align:left;font-weight:800;color:var(--navy);}
+.trend-status-pill{display:inline-flex;padding:2px 8px;border-radius:999px;font-size:9.5px;font-weight:900;letter-spacing:.2px;}
+.trend-status-pill.is-mtd{background:#fdf3d8;color:#946f00;border:1px solid #ecdca4;}
+.trend-status-pill.is-closing{background:#e8f3ec;color:#1c6b3f;border:1px solid #bfe0cb;}
+.trend-national-note{margin-top:10px;color:var(--ink-faint);font-size:10.5px;font-weight:700;}
+@media (max-width:640px){.modal-box.modal-trend-national{padding:16px}.modal-trend-national .trend-chart-wrap{height:250px}.summary-strip-action .summary-strip-label{font-size:12px}}
 
 /* ===== Simulasi Ranking (client-side, tidak mengubah ranking resmi) ===== */
 .simulation-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:13px 15px;margin-bottom:14px;border:1px solid #d8c36e;border-radius:11px;background:#fff9df;color:#5f4a00;}
@@ -1206,7 +1243,9 @@ select:focus,input:focus{outline:2px solid var(--gold);outline-offset:1px;}
 .public-data-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;padding:11px 14px;border:1px solid #c9dff3;border-radius:10px;background:#f3f8fd;color:#245a94;font-size:12px;}
 .public-data-banner.cache-source{border-color:#f0c5b8;background:#fff6f2;color:#8f3e28;}
 .publication-history-actions{display:flex;justify-content:flex-end;gap:7px;}
-@media (max-width:1100px){.topbar-auth-actions{width:100%;order:100;}.publication-summary{grid-template-columns:1fr;}}
+/* width:100%/order:100 lama dipakai saat auth-actions masih child langsung #topbar.
+   Sekarang ia anggota Row 2, jadi pemaksaan itu hanya akan memecah Row 2 tanpa perlu. */
+@media (max-width:1100px){.publication-summary{grid-template-columns:1fr;}}
 
 </style>
 </head>
@@ -6538,6 +6577,8 @@ function renderTopbar(path, params) {
       <div class="topbar-title">${escapeHtml(PAGE_TITLES[path] || 'Dashboard')}</div>
       <div class="breadcrumb">${crumbs.map((c, i) => c.link && i < crumbs.length - 1 ? `<a href="#${c.link}">${escapeHtml(c.label)}</a>` : `<span>${escapeHtml(c.label)}</span>`).join(' &rsaquo; ')}</div>
     </div>
+    <div class="topbar-controls">
+    <div class="topbar-controls-row topbar-controls-row-primary">
     ${periodSelectorHtml()}
     ${dataSummary ? `<button type="button" class="topbar-data-summary" id="topbar-data-summary" aria-expanded="false"><span class="dot"></span>${escapeHtml(dataSummary)}</button>` : ''}
     ${showPhaseFilter ? `
@@ -6548,6 +6589,8 @@ function renderTopbar(path, params) {
       <div class="topbar-phase-filter">
         <button type="button" class="btn btn-outline btn-sm topbar-global-filter-btn" id="topbar-region-btn" aria-expanded="false" aria-haspopup="dialog" title="Filter global Regional (boleh lebih dari satu)">Regional: ${escapeHtml(globalRegionFilterLabel())} ▾</button>
       </div>` : ''}
+    </div>
+    <div class="topbar-controls-row topbar-controls-row-secondary">
     ${showStatusFilter ? `
       <div class="topbar-phase-filter">
         <button type="button" class="btn btn-outline btn-sm topbar-status-btn" id="topbar-status-btn">Status Salesman: ${escapeHtml(statusSalesmanFilterLabel())} ▾</button>
@@ -6563,6 +6606,8 @@ function renderTopbar(path, params) {
         ${State.supabaseReady ? '<button class="btn btn-outline btn-sm" id="topbar-refresh-btn">Perbarui Data</button>' : ''}
         <button class="btn btn-ghost btn-sm" id="topbar-login-btn">Login Admin</button>
       `}
+    </div>
+    </div>
     </div>
     ${vacantIncluded ? `<div class="topbar-vacant-warning">⚠ Posisi VACANT sedang disertakan dalam perhitungan.</div>` : ''}`;
   const btn = document.getElementById('topbar-upload-btn'); if (btn) btn.addEventListener('click', () => navigate('/upload'));
@@ -6606,7 +6651,14 @@ function renderSummaryStrip(h, v) {
     ${summaryStripItem('👔', h.byAss.length, 'ASS', cardLink('/ranking-ass'))}
     <span class="summary-strip-divider"></span>
     ${summaryStripItem('🧑‍💼', v.totalRead, 'Salesman', cardLink('/ranking-salesman'))}
+    <span class="summary-strip-divider"></span>
+    ${summaryStripActionItem('📈', 'Trend Nasional')}
   </div>`;
+}
+// Trigger Trend Nasional: <button> asli (bukan href palsu) sehingga keyboard-accessible
+// tanpa handler tambahan, TANPA data-counter palsu, dan tetap item TERAKHIR strip.
+function summaryStripActionItem(icon, label) {
+  return `<button type="button" class="summary-strip-item summary-strip-action" id="dashboard-trend-national-btn" title="Lihat Trend Nasional" aria-label="Lihat Trend Nasional"><span class="summary-strip-icon" aria-hidden="true">${icon}</span><span class="summary-strip-label">${escapeHtml(label)}</span></button>`;
 }
 
 // ===== Performa Nasional (gabungan Top 5 dengan tab 5 Terbaik / 5 Performa Terendah) =====
@@ -6766,6 +6818,10 @@ function wireDashboardPage() {
   });
   State.dashboardAnimated = true;
   wirePerformaNasionalPanel();
+
+  // LAZY: payload historis baru diambil setelah tombol ditekan, bukan saat Dashboard render.
+  const trendNationalBtn = document.getElementById('dashboard-trend-national-btn');
+  if (trendNationalBtn) trendNationalBtn.addEventListener('click', () => { openTrendNationalModal(); }, { signal: State.pageSignal });
 
   const toggle = document.getElementById('dashboard-download-toggle');
   const menu = document.getElementById('dashboard-download-menu');
@@ -7275,11 +7331,21 @@ function trendHierarchyRows(level, hierarchy) {
   if (level === 'salesman') return hierarchy.salesmanScored || [];
   return [];
 }
-function trendFindHistoricalRow(level, payload, targetIdentity, scopeContext) {
+/**
+ * Baris historis satu entity. Pipeline: master Publish Scope -> Global Phase ->
+ * Global Regional -> Status Salesman -> validation/KPI engine existing -> hierarchy.
+ * masterRegionSet DITERIMA dari pemanggil (di-resolve sekali per series), sehingga
+ * tidak ada fetch scope berulang per bulan. Global Filter hanya dapat MEMPERSEMPIT
+ * master scope, tidak pernah memperluasnya, karena dijalankan setelahnya.
+ */
+function trendFindHistoricalRow(level, payload, targetIdentity, scopeContext, masterRegionSet) {
   return withTrendPayloadContext(payload, () => {
     const snapshot = canonicalSnapshot(payload.activeSnapshot);
     const rawRecords = snapshot && Array.isArray(snapshot.rawRecords) ? snapshot.rawRecords : [];
-    const scopedRecords = applyGlobalScope(rawRecords, scopeContext.phaseSet, scopeContext.regionSet)
+    const inMasterScope = masterRegionSet
+      ? rawRecords.filter(record => recordInPublishScope(record, masterRegionSet))
+      : rawRecords;
+    const scopedRecords = applyGlobalScope(inMasterScope, scopeContext.phaseSet, scopeContext.regionSet)
       .filter(record => scopeContext.statuses.has(getEffectiveSalesmanStatus(record)));
     const settings = trendPayloadSettings(payload);
 
@@ -7333,6 +7399,41 @@ async function trendFetchOfficialPayload(period) {
   validatePublishedPayload(remote.payload_json);
   return cachePutBounded(State.trendPayloadCache, cacheKey, remote.payload_json, TREND_PAYLOAD_CACHE_LIMIT);
 }
+/**
+ * MASTER PUBLISH SCOPE — SATU-SATUNYA sumber logic untuk Trend Performance entity
+ * MAUPUN Trend Nasional. Keduanya wajib memakai helper ini agar business scope-nya
+ * identik; jangan pernah membuat lapisan Publish Scope kedua.
+ *
+ * Master allowed-region = Regional yang benar-benar ADA pada payload RESMI periode
+ * scope, yaitu official period TERBARU yang isPeriodCurrent === true dan
+ * periodKey <= activePeriodKey (elemen terakhir dari officialPeriods yang sudah
+ * difilter & diurutkan pemanggil). Generic: tidak ada nama Regional yang di-hardcode.
+ *
+ * Derivasi dari rawRecords (bukan metadata.publishScope.includedRegions) dipilih
+ * karena selalu sama-atau-lebih-sempit: Regional yang di-take-out saat publish tidak
+ * meninggalkan satu record pun, dan payload legacy tanpa metadata scope tetap
+ * tertangani oleh mekanisme yang sama.
+ *
+ * FAIL CLOSED — bila payload periode scope tidak dapat dibaca, pemanggil GAGAL dan
+ * menampilkan error state existing. TIDAK PERNAH fallback ke populasi historis penuh.
+ *
+ * Di-resolve SATU KALI per pembentukan series lalu diteruskan ke setiap historical
+ * point; payload-nya sendiri diambil lewat trendFetchOfficialPayload() sehingga ikut
+ * State.trendPayloadCache dan tidak pernah di-fetch berulang per bulan.
+ */
+async function trendMasterRegionSet(officialPeriods) {
+  const scopePeriod = officialPeriods.length ? officialPeriods[officialPeriods.length - 1] : null;
+  if (!scopePeriod) throw new Error('Periode resmi untuk master Publish Scope tidak tersedia.');
+  const payload = await trendFetchOfficialPayload(scopePeriod);
+  const snapshot = canonicalSnapshot(payload.activeSnapshot);
+  const regionSet = toRegionKeySet(getPublishScopeRegionOptions(snapshot).map(option => option.value));
+  if (!regionSet.size) throw new Error('Master Publish Scope periode aktif kosong.');
+  return { regionSet, scopePeriod };
+}
+// Signature master scope untuk cache key — dipakai Trend entity dan Trend Nasional.
+function trendMasterScopeSignature(scopePeriod, masterRegionSet) {
+  return `${scopePeriod.periodKey}#${Array.from(masterRegionSet).sort().join('|')}`;
+}
 async function trendMapWithConcurrency(items, limit, mapper) {
   const results = new Array(items.length);
   let cursor = 0;
@@ -7367,18 +7468,28 @@ async function buildOfficialTrendSeries(level, row) {
     regionSet: new Set(State.activeRegionFilters || []),
     statuses: new Set(getActiveStatusSalesmanFilter())
   };
+  if (!officialPeriods.length) {
+    return { level, entity: targetIdentity, activePeriodKey, points: [] };
+  }
+  // Master Publish Scope di-resolve SEKALI di sini, lalu dipakai untuk seluruh titik.
+  const { regionSet: masterRegionSet, scopePeriod } = await trendMasterRegionSet(officialPeriods);
+
   const revisionSignature = officialPeriods.map(period => trendCacheKeyForPeriod(period)).join('~');
   const scopeSignature = [
     Array.from(scopeContext.phaseSet).sort().join('|'),
     Array.from(scopeContext.regionSet).sort().join('|'),
     Array.from(scopeContext.statuses).sort().join('|')
   ].join('~');
-  const seriesCacheKey = [level, targetIdentity.key, activePeriodKey, scopeSignature, revisionSignature].join('::');
+  // Master Publish Scope kini bagian dari universe perhitungan, sehingga WAJIB masuk
+  // cache key: series lama dengan scope A+B+C tidak boleh dipakai ulang setelah
+  // periode aktif berpindah ke scope A+B (dan sebaliknya).
+  const masterScopeSignature = trendMasterScopeSignature(scopePeriod, masterRegionSet);
+  const seriesCacheKey = [level, targetIdentity.key, activePeriodKey, masterScopeSignature, scopeSignature, revisionSignature].join('::');
   if (State.trendSeriesCache.has(seriesCacheKey)) return State.trendSeriesCache.get(seriesCacheKey);
 
   const points = await trendMapWithConcurrency(officialPeriods, 2, async period => {
     const payload = await trendFetchOfficialPayload(period);
-    const historicalRow = trendFindHistoricalRow(level, payload, targetIdentity, scopeContext);
+    const historicalRow = trendFindHistoricalRow(level, payload, targetIdentity, scopeContext, masterRegionSet);
     return {
       periodKey: period.periodKey,
       periodStatus: normalizePeriodStatusValue(period.periodStatus) || PERIOD_STATUS_MTD,
@@ -7510,6 +7621,264 @@ async function openTrendPerformanceModal(level, row) {
     if (!overlay.isConnected) return;
     const shell = overlay.querySelector('#trend-performance-shell');
     if (shell) shell.innerHTML = '<div class="trend-error">Gagal memuat Trend Performance.</div>';
+  }
+}
+
+/* ============================================================
+   TREND NASIONAL — agregasi national-level, OFFICIAL HISTORY ONLY, READ-ONLY
+   ------------------------------------------------------------
+   Seluruh subsystem di bawah ini AUDITIF terhadap Trend Performance entity:
+   memakai TREND_KPI_OPTIONS, trendPayloadSettings(), withTrendPayloadContext(),
+   trendFetchOfficialPayload(), trendMapWithConcurrency(), trendAllKpiValues(),
+   trendOfficialPeriodLabel(), trendSummary(), trendDeltaDirection(),
+   trendFormatValue(), State.trendPayloadCache dan State.trendSeriesCache yang
+   SAMA. Tidak ada engine KPI/scoring baru dan tidak ada cache store baru.
+
+   MASTER PUBLISH SCOPE dibagi dengan Trend Performance entity: keduanya memakai
+   trendMasterRegionSet() dan trendMasterScopeSignature() yang SAMA (didefinisikan
+   di section Trend Performance di atas), sehingga Trend Nasional dan Trend entity
+   tunduk pada business scope yang identik — satu semantik, satu sumber logic.
+   ============================================================ */
+
+/**
+ * Agregat NASIONAL satu periode historis. Bukan rata-rata Regional: seluruh
+ * populasi salesman yang lolos scope digabung menjadi satu dataset, lalu diserahkan
+ * ke validateDataset() + buildHierarchy() existing dan diambil hierarchy.national —
+ * baris yang sama persis dengan yang dipakai Dashboard Nasional.
+ *
+ * Urutan pipeline mengikuti §9: master Publish Scope -> Global Phase -> Global
+ * Regional -> Status Salesman -> validation/KPI engine existing.
+ * TAT tidak pernah diambil dari periode aktif: setiap payload membawa TAT-nya
+ * sendiri di dalam record historisnya, persis seperti Trend entity.
+ */
+function trendNationalRowForPayload(payload, scopeContext, masterRegionSet) {
+  return withTrendPayloadContext(payload, () => {
+    const snapshot = canonicalSnapshot(payload.activeSnapshot);
+    const rawRecords = snapshot && Array.isArray(snapshot.rawRecords) ? snapshot.rawRecords : [];
+    const inMasterScope = rawRecords.filter(record => recordInPublishScope(record, masterRegionSet));
+    const scopedRecords = applyGlobalScope(inMasterScope, scopeContext.phaseSet, scopeContext.regionSet)
+      .filter(record => scopeContext.statuses.has(getEffectiveSalesmanStatus(record)));
+    if (!scopedRecords.length) return null;
+    const hierarchy = buildHierarchy(validateDataset(scopedRecords), trendPayloadSettings(payload));
+    return hierarchy && hierarchy.national ? hierarchy.national : null;
+  });
+}
+
+async function buildNationalTrendSeries() {
+  if (!State.periodFeatureReady || !State.supabaseReady || !window.SupabaseService
+      || typeof window.SupabaseService.getOfficialPeriods !== 'function'
+      || typeof window.SupabaseService.getOfficialPeriodSnapshot !== 'function') {
+    throw new Error('Official Period History belum tersedia.');
+  }
+  const activePeriodKey = normalizePeriodKeyValue(State.activePeriodKey) || snapshotPeriodKey(State.activeSnapshot);
+  if (!activePeriodKey) throw new Error('Periode aktif tidak tersedia.');
+
+  // isPeriodCurrent === true  -> publikasi yang DIBATALKAN otomatis gugur, dan revisi
+  // arsip TIDAK PERNAH dipromosikan menjadi pengganti bulan tersebut.
+  // periodKey <= activePeriodKey -> cut-off periode aktif.
+  const officialPeriods = (await window.SupabaseService.getOfficialPeriods(TREND_HISTORY_CANDIDATE_LIMIT))
+    .filter(period => period && period.isPeriodCurrent === true && isValidPeriodKey(period.periodKey) && period.periodKey <= activePeriodKey)
+    .sort((a, b) => a.periodKey.localeCompare(b.periodKey))
+    .slice(-TREND_HISTORY_LIMIT);
+  if (!officialPeriods.length) {
+    return { activePeriodKey, points: [], scopePeriodKey: null, masterRegionCount: 0 };
+  }
+
+  const scopeContext = {
+    phaseSet: new Set(State.activePhaseFilters || []),
+    regionSet: new Set(State.activeRegionFilters || []),
+    statuses: new Set(getActiveStatusSalesmanFilter())
+  };
+  const { regionSet: masterRegionSet, scopePeriod } = await trendMasterRegionSet(officialPeriods);
+
+  const revisionSignature = officialPeriods.map(period => trendCacheKeyForPeriod(period)).join('~');
+  const scopeSignature = [
+    Array.from(scopeContext.phaseSet).sort().join('|'),
+    Array.from(scopeContext.regionSet).sort().join('|'),
+    Array.from(scopeContext.statuses).sort().join('|')
+  ].join('~');
+  // Kunci memuat periode aktif, master Publish Scope, ketiga Global Filter, dan
+  // signature revisi seluruh periode resmi -> perubahan scope tidak pernah memakai
+  // series basi. Disimpan pada trendSeriesCache yang sama dengan Trend entity,
+  // sehingga invalidateCancelledPublicationCaches() ikut membersihkannya.
+  const seriesCacheKey = [
+    'national', activePeriodKey,
+    trendMasterScopeSignature(scopePeriod, masterRegionSet),
+    scopeSignature, revisionSignature
+  ].join('::');
+  if (State.trendSeriesCache.has(seriesCacheKey)) return State.trendSeriesCache.get(seriesCacheKey);
+
+  const points = await trendMapWithConcurrency(officialPeriods, 2, async period => {
+    const payload = await trendFetchOfficialPayload(period);
+    const nationalRow = trendNationalRowForPayload(payload, scopeContext, masterRegionSet);
+    return {
+      periodKey: period.periodKey,
+      periodStatus: normalizePeriodStatusValue(period.periodStatus) || PERIOD_STATUS_MTD,
+      label: trendOfficialPeriodLabel(period, false),
+      shortLabel: trendOfficialPeriodLabel(period, true),
+      values: trendAllKpiValues(nationalRow)
+    };
+  });
+  const result = {
+    activePeriodKey, points,
+    scopePeriodKey: scopePeriod.periodKey,
+    masterRegionCount: masterRegionSet.size
+  };
+  return cachePutBounded(State.trendSeriesCache, seriesCacheKey, result, TREND_SERIES_CACHE_LIMIT);
+}
+
+function trendNationalDeltaText(delta, kpiKey, option) {
+  if (delta === null || delta === undefined || !Number.isFinite(Number(delta))) return '-';
+  const direction = trendDeltaDirection(delta);
+  const arrow = direction === 'stable' ? '→' : direction === 'up' ? '↑' : '↓';
+  // AVG EC bukan skor berbobot -> tanpa satuan "pts", konsisten dengan Trend entity.
+  const unit = kpiKey === 'avgEc' ? '' : ' pts';
+  return `${delta > 0 ? '+' : ''}${fmtNumber(delta, option.decimals)}${unit} ${arrow}`;
+}
+function trendNationalStatusPill(status) {
+  const isMtd = normalizePeriodStatusValue(status) === PERIOD_STATUS_MTD;
+  return `<span class="trend-status-pill ${isMtd ? 'is-mtd' : 'is-closing'}">${isMtd ? 'MTD' : 'Closing'}</span>`;
+}
+function trendNationalDetailTableHtml(points, kpiKey, option) {
+  let previousValue = null;
+  const rows = points.map(point => {
+    const value = point.values[kpiKey];
+    const valid = Number.isFinite(value);
+    // Delta selalu dibandingkan terhadap titik VALID sebelumnya, bukan baris sebelumnya.
+    const delta = valid && previousValue !== null ? value - previousValue : null;
+    const deltaHtml = valid ? escapeHtml(trendNationalDeltaText(delta, kpiKey, option)) : '-';
+    if (valid) previousValue = value;
+    return `<tr>
+      <td class="trend-national-period">${escapeHtml(point.label)}</td>
+      <td>${trendNationalStatusPill(point.periodStatus)}</td>
+      <td>${escapeHtml(trendFormatValue(value, option))}</td>
+      <td>${deltaHtml}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="trend-national-detail">
+    <h3>Detail Bulanan</h3>
+    <div class="trend-national-table-wrap"><table class="trend-national-table">
+      <thead><tr><th>Periode</th><th>Status</th><th>Nilai KPI</th><th>Δ vs Previous</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+  </div>`;
+}
+function renderTrendNationalView(series, kpiKey) {
+  const option = TREND_KPI_OPTIONS[kpiKey] || TREND_KPI_OPTIONS.finalScore;
+  const content = document.getElementById('trend-national-content');
+  if (!content) return;
+  const destroyChart = () => {
+    if (ChartRegistry['trend-national-chart']) {
+      ChartRegistry['trend-national-chart'].destroy();
+      delete ChartRegistry['trend-national-chart'];
+    }
+  };
+  const summary = trendSummary(series.points, kpiKey);
+  if (!summary) {
+    destroyChart();
+    content.innerHTML = '<div class="trend-empty">Belum ada data historis resmi untuk scope/KPI ini.</div>';
+    return;
+  }
+  content.innerHTML = `
+    <div class="trend-chart-wrap"><canvas id="trend-national-chart" aria-label="Grafik Trend Nasional ${escapeHtml(option.label)}" role="img"></canvas></div>
+    <div class="trend-summary-grid">
+      <div class="trend-summary-card"><div class="trend-summary-label">Latest</div><div class="trend-summary-value">${escapeHtml(trendFormatValue(summary.latest.values[kpiKey], option))}</div></div>
+      <div class="trend-summary-card"><div class="trend-summary-label">Vs Previous</div><div class="trend-summary-value">${escapeHtml(trendNationalDeltaText(summary.delta, kpiKey, option))}</div></div>
+      <div class="trend-summary-card"><div class="trend-summary-label">Trend</div><div class="trend-summary-value">${escapeHtml(summary.trend)}</div></div>
+      <div class="trend-summary-card"><div class="trend-summary-label">Best Month</div><div class="trend-summary-value">${escapeHtml(summary.best.label)}</div></div>
+    </div>
+    ${trendNationalDetailTableHtml(series.points, kpiKey, option)}
+    <div class="trend-national-note">Trend menggunakan Official Published Period. Bulan tanpa publikasi resmi (termasuk yang dibatalkan) tidak ditampilkan sebagai titik, dan periode tanpa populasi valid bernilai kosong — bukan 0.</div>`;
+  renderChart('trend-national-chart', {
+    type: 'line',
+    data: {
+      labels: series.points.map(point => point.shortLabel),
+      datasets: [{
+        label: option.label,
+        data: series.points.map(point => point.values[kpiKey]),
+        borderColor: '#1f355e',
+        backgroundColor: 'rgba(205,164,52,.15)',
+        pointBackgroundColor: '#cda434',
+        pointBorderColor: '#1f355e',
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        borderWidth: 2.5,
+        tension: .25,
+        spanGaps: false,
+        fill: true
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: items => items.length ? series.points[items[0].dataIndex].label : '',
+            label: item => `${option.label}: ${trendFormatValue(item.raw, option)}`
+          }
+        }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#667085', maxRotation: 0, autoSkip: true } },
+        y: {
+          beginAtZero: false,
+          ticks: { color: '#667085', callback: value => option.percent ? `${fmtNumber(Number(value), 0)}%` : fmtNumber(Number(value), option.decimals) },
+          grid: { color: 'rgba(31,53,94,.08)' }
+        }
+      }
+    }
+  });
+}
+async function openTrendNationalModal() {
+  const overlay = openModal(`
+    <div class="trend-head">
+      <h2>TREND NASIONAL</h2>
+      <div class="trend-head-sub">Perkembangan performa berdasarkan Official Published Period.</div>
+      <span class="trend-source">Sumber: Official Published Period</span>
+    </div>
+    <div id="trend-national-shell"><div class="trend-loading"><div class="loading-spinner"></div><span>Memuat Trend Nasional...</span></div></div>`,
+    { extraClass: 'modal-trend-national' });
+  const closeButton = overlay.querySelector('[data-act="close"]');
+  if (closeButton) { closeButton.textContent = '×'; closeButton.title = 'Tutup'; closeButton.setAttribute('aria-label', 'Tutup Trend Nasional'); }
+  // Chart di-destroy saat modal ditutup dengan cara apa pun (tombol, overlay, Escape).
+  const observer = new MutationObserver(() => {
+    if (overlay.isConnected) return;
+    if (ChartRegistry['trend-national-chart']) {
+      ChartRegistry['trend-national-chart'].destroy();
+      delete ChartRegistry['trend-national-chart'];
+    }
+    observer.disconnect();
+  });
+  observer.observe(document.body, { childList: true });
+  try {
+    const series = await buildNationalTrendSeries();
+    if (!overlay.isConnected) return;
+    const shell = overlay.querySelector('#trend-national-shell');
+    shell.innerHTML = `
+      <div class="trend-control"><label for="trend-national-kpi-select">KPI:</label>
+        <select id="trend-national-kpi-select">${Object.entries(TREND_KPI_OPTIONS).map(([key, option]) => `<option value="${key}">${escapeHtml(option.label)}</option>`).join('')}</select>
+      </div>
+      <div class="trend-national-context">
+        <span class="trend-national-chip">S.d. Periode: <b>${escapeHtml(periodOptionLabel(series.activePeriodKey, normalizePeriodStatusValue(State.activeSnapshot && State.activeSnapshot.periodStatus) || (State.remotePublication && State.remotePublication.periodStatus) || PERIOD_STATUS_MTD))}</b></span>
+        <span class="trend-national-chip">Phase: <b>${escapeHtml(globalPhaseFilterLabel())}</b></span>
+        <span class="trend-national-chip">Regional: <b>${escapeHtml(globalRegionFilterLabel())}</b></span>
+        <span class="trend-national-chip">Status: <b>${escapeHtml(statusSalesmanFilterLabel())}</b></span>
+        <span class="trend-national-chip">Publish Scope: <b>${fmtNumber(series.masterRegionCount)} Regional</b></span>
+        <span class="trend-national-chip">History: <b>${fmtNumber(series.points.length)} periode resmi</b></span>
+      </div>
+      <div id="trend-national-content"></div>`;
+    const selector = shell.querySelector('#trend-national-kpi-select');
+    // Ganti KPI hanya menggambar ulang dari series yang SUDAH ada — tanpa refetch payload.
+    selector.addEventListener('change', () => renderTrendNationalView(series, selector.value));
+    renderTrendNationalView(series, 'finalScore');
+  } catch (error) {
+    console.error('Trend Nasional gagal dimuat:', error);
+    if (!overlay.isConnected) return;
+    const shell = overlay.querySelector('#trend-national-shell');
+    if (shell) shell.innerHTML = '<div class="trend-error">Gagal memuat Trend Nasional.</div>';
   }
 }
 
