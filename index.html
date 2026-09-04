@@ -786,7 +786,7 @@ select:focus,input:focus{outline:2px solid var(--gold);outline-offset:1px;}
 .regional-depo-jpg-table tbody tr:nth-child(even) td{background:#fafaf8;}
 .modal-close{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--ink-soft);font-size:22px;cursor:pointer;}
 .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px;flex-wrap:wrap;}
-.modal-confirm p{margin-top:0;}
+.modal-confirm p{margin-top:0;white-space:pre-line;}
 
 /* ===== Trend Performance (read-only official period history) ===== */
 .ranking-trend-btn{width:32px;height:30px;padding:0;border:1px solid var(--card-border);border-radius:8px;background:#fff;cursor:pointer;font-size:16px;line-height:1;display:inline-flex;align-items:center;justify-content:center;transition:border-color .15s ease,background .15s ease,transform .15s ease;}
@@ -1943,6 +1943,31 @@ const Storage = (() => {
     const id = viewerCacheKey(periodKey);
     return new Promise((resolve, reject) => { const r = store.get(id); r.onsuccess = () => resolve(r.result || null); r.onerror = (e) => reject(e.target.error); });
   }
+  /**
+   * Menghapus SATU record Viewer Cache periode: 'period:YYYY-MM'.
+   *
+   * FAIL-CLOSED — SENGAJA TIDAK memakai viewerCacheKey(): helper itu jatuh ke
+   * legacy key 'active' untuk input yang tidak valid, dan pada operasi HAPUS
+   * perilaku itu berbahaya (satu bug input bisa membuang cache legacy).
+   * Di sini periodKey divalidasi ketat lebih dulu; input non-canonical
+   * mengembalikan false TANPA menghapus apa pun.
+   *
+   * Cache periode lain, legacy 'active', snapshot lokal, Master Cabang, VACANT,
+   * dan settings TIDAK PERNAH tersentuh — penghapusan memakai store.delete(id)
+   * pada satu id spesifik, bukan clear().
+   */
+  async function deleteViewerCache(periodKey) {
+    const key = typeof periodKey === 'string' ? periodKey.trim() : '';
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(key)) return false;   // fail-closed
+    const id = `period:${key}`;
+    if (id === VIEWER_CACHE_LEGACY_KEY) return false;          // sabuk pengaman kedua
+    const store = await tx(APP_CONFIG.STORE_VIEWER_CACHE, 'readwrite');
+    return new Promise((resolve, reject) => {
+      const r = store.delete(id);
+      r.onsuccess = () => resolve(true);
+      r.onerror = (e) => reject(e.target.error);
+    });
+  }
   // Daftar cache periode (untuk period selector saat Supabase tidak dapat dihubungi).
   async function listViewerCachePeriods() {
     const store = await tx(APP_CONFIG.STORE_VIEWER_CACHE, 'readonly');
@@ -1952,7 +1977,7 @@ const Storage = (() => {
       r.onerror = (e) => reject(e.target.error);
     });
   }
-  return { saveSnapshot, saveAndActivateSnapshot, listSnapshots, getSnapshot, deleteSnapshot, setActiveSnapshot, getActiveSnapshot, saveSettings, getSettings, listVacantSalesmen, putVacantSalesmen, deleteVacantSalesman, clearVacantSalesmen, saveMasterCabang, getMasterCabang, saveViewerCache, getViewerCache, listViewerCachePeriods };
+  return { saveSnapshot, saveAndActivateSnapshot, listSnapshots, getSnapshot, deleteSnapshot, setActiveSnapshot, getActiveSnapshot, saveSettings, getSettings, listVacantSalesmen, putVacantSalesmen, deleteVacantSalesman, clearVacantSalesmen, saveMasterCabang, getMasterCabang, saveViewerCache, getViewerCache, deleteViewerCache, listViewerCachePeriods };
 })();
 
 // LocalStorage: hanya untuk preferensi ringan (bukan dataset)
@@ -5713,6 +5738,73 @@ function renderPublicationHistoryPage() {
   return `<div class="page-header"><h1>Riwayat Publikasi Nasional</h1><p class="page-sub">Riwayat ini terpisah dari riwayat upload lokal Admin.</p></div>
     <div class="panel"><div id="publication-history-content"><div class="loading-state">Memuat riwayat publikasi...</div></div></div>`;
 }
+/* ------------------------------------------------------------
+   BATALKAN PUBLISH — DETEKSI CAPABILITY BACKEND
+   ------------------------------------------------------------
+   HASIL AUDIT (setup.sql, period-history-migration.sql, supabase-service.js):
+   backend saat ini BELUM memiliki RPC/service pembatalan publikasi. RPC yang
+   tersedia hanya publish_national_snapshot, activate_published_snapshot,
+   publish_period_snapshot_v1, dan activate_period_snapshot_v1 — semuanya
+   MENGAKTIFKAN, tidak ada yang mencabut status official.
+
+   Karena itu frontend HANYA mendeteksi dan memanggil service bila tersedia.
+   TIDAK ADA fallback direct UPDATE ke published_snapshots: selain melanggar
+   arsitektur, role anon/authenticated memang hanya diberi GRANT SELECT pada
+   kolom tertentu (setup.sql §"revoke all privileges" + migration §13), sehingga
+   UPDATE dari browser pasti ditolak database. Membuat "berhasil" secara lokal
+   akan menjadi fake success dan itu dilarang.
+
+   Nama service disiapkan untuk Phase 2. Beberapa alias diterima agar penamaan
+   final di supabase-service.js tidak memaksa index.html diubah lagi.
+   ------------------------------------------------------------ */
+const PUBLICATION_CANCEL_SERVICE_METHODS = [
+  'cancelPeriodPublication',
+  'cancelPublishedPeriod',
+  'cancelPeriodSnapshot'
+];
+// Mengembalikan { name, invoke } bila backend sudah menyediakan pembatalan, atau null.
+function publicationCancelCapability() {
+  const service = window.SupabaseService;
+  if (!service) return null;
+  const name = PUBLICATION_CANCEL_SERVICE_METHODS.find(method => typeof service[method] === 'function');
+  if (!name) return null;
+  return { name, invoke: (publicationId, periodKey) => service[name](publicationId, periodKey) };
+}
+const PUBLICATION_CANCEL_UNAVAILABLE_MESSAGE =
+  'Fitur Batalkan Publish belum tersedia pada backend. Perbarui Supabase Service dan Period Migration terlebih dahulu.';
+
+// Baris boleh dibatalkan hanya bila benar-benar publikasi RESMI periode tersebut.
+function canCancelPublicationRow(row, periodMode) {
+  return !!row
+    && periodMode === true
+    && row.isPeriodCurrent === true
+    && isRankingAdminView()
+    && !!String(row.id || '').trim()
+    && isValidPeriodKey(row.periodKey);
+}
+
+/**
+ * Invalidasi setelah pembatalan BERHASIL. Narrowly-scoped: hanya periode yang
+ * dibatalkan. Cache periode lain tidak disentuh.
+ * trendSeriesCache di-clear seluruhnya karena kunci seriesnya memuat signature
+ * daftar official period — begitu satu periode hilang, seluruh entry lama memang
+ * sudah tidak dapat dipakai lagi.
+ */
+function invalidateCancelledPublicationCaches(periodKey) {
+  const key = normalizePeriodKeyValue(periodKey);
+  if (!key) return;
+  if (State.trendPayloadCache instanceof Map) {
+    Array.from(State.trendPayloadCache.keys())
+      .filter(cacheKey => String(cacheKey).startsWith(`${key}|`))
+      .forEach(cacheKey => State.trendPayloadCache.delete(cacheKey));
+  }
+  if (State.trendSeriesCache instanceof Map) State.trendSeriesCache.clear();
+  // Publikasi yang dibatalkan tidak boleh lagi dipakai sebagai data aktif.
+  if (State.remotePublication && normalizePeriodKeyValue(State.remotePublication.periodKey) === key) {
+    State.remotePublication = null;
+  }
+}
+
 async function wirePublicationHistoryPage() {
   if (!requireAdmin('melihat riwayat publikasi')) return;
   const container = document.getElementById('publication-history-content');
@@ -5747,7 +5839,11 @@ async function wirePublicationHistoryPage() {
         <td>${fmtDateTimeId(Date.parse(row.publishedAt))}</td>
         <td>${escapeHtml(row.fileName || '-')}</td><td>${fmtNumber(row.recordCount)}</td><td>${fmtNumber(row.eligibleCount)}</td>
         <td>${row.isPeriodCurrent ? '<span class="badge cat-perfect">Resmi Periode</span>' : '<span class="badge badge-muted">Arsip</span>'}${row.isActive ? ' <span class="badge badge-muted">Default Global</span>' : ''}</td>
-        <td><div class="publication-history-actions">${row.isPeriodCurrent ? '-' : `<button class="btn btn-xs btn-outline activate-publication" data-id="${escapeHtml(row.id)}" data-period="${escapeHtml(row.periodKey || '')}">Jadikan Resmi</button>`}</div></td>
+        <td><div class="publication-history-actions">${row.isPeriodCurrent
+          ? (canCancelPublicationRow(row, periodMode)
+            ? `<button class="btn btn-xs btn-danger cancel-publication" data-id="${escapeHtml(row.id)}" data-period="${escapeHtml(row.periodKey || '')}" title="Batalkan publikasi resmi periode ini">Batalkan Publish</button>`
+            : '-')
+          : `<button class="btn btn-xs btn-outline activate-publication" data-id="${escapeHtml(row.id)}" data-period="${escapeHtml(row.periodKey || '')}">Jadikan Resmi</button>`}</div></td>
       </tr>`).join('')}</tbody></table></div>`;
     container.querySelectorAll('.activate-publication').forEach(button => button.addEventListener('click', () => {
       const snapshotId = button.dataset.id;
@@ -5770,6 +5866,83 @@ async function wirePublicationHistoryPage() {
           showToast(safeUserError(error, 'Rollback gagal.'), 'error');
         }
       }, { confirmLabel: 'Ya, Lanjutkan' });
+    }));
+
+    /* --------------------------------------------------------------------
+       BATALKAN PUBLISH — satu PUBLICATION UNIT per periode, bukan per file.
+       Membatalkan berarti periode tersebut TIDAK LAGI punya publikasi resmi.
+       BUKAN delete: seluruh revisi tetap tersimpan sebagai arsip, dan revisi
+       sebelumnya TIDAK diaktifkan otomatis. Untuk menampilkan data lagi,
+       Admin harus Publish ulang (revisi baru, counter tidak di-reset).
+       -------------------------------------------------------------------- */
+    const cancelButtons = Array.from(container.querySelectorAll('.cancel-publication'));
+    cancelButtons.forEach(button => button.addEventListener('click', () => {
+      if (State.publicationBusy || button.disabled) return;
+      const publicationId = button.dataset.id;
+      const rowPeriod = button.dataset.period || '';
+      const periodLabel = periodMonthLabel(rowPeriod);
+      const message = `Batalkan publikasi ${periodLabel}?\n\n`
+        + `Seluruh data resmi ${periodLabel} tidak akan lagi tampil di Viewer.\n\n`
+        + 'Riwayat publikasi tetap disimpan dan revisi sebelumnya tidak akan otomatis diaktifkan.';
+      showConfirmDialog(message, async () => {
+        if (!requireAdmin('membatalkan publikasi')) return;
+        // Guard kedua: dialog konfirmasi bisa dibuka dari beberapa baris sebelum
+        // salah satunya dikonfirmasi. Request duplikat tidak boleh terkirim.
+        if (State.publicationBusy) { showToast('Proses publikasi lain sedang berjalan.', 'info'); return; }
+
+        // DETEKSI CAPABILITY DILAKUKAN SEBELUM UI/state apa pun diubah.
+        const capability = publicationCancelCapability();
+        if (!capability) {
+          showToast(PUBLICATION_CANCEL_UNAVAILABLE_MESSAGE, 'error');
+          return;   // tidak ada perubahan state, cache, maupun tampilan.
+        }
+
+        State.publicationBusy = true;
+        cancelButtons.forEach(btn => { btn.disabled = true; });
+        showLoadingOverlay(`Membatalkan publikasi ${periodLabel}...`);
+        try {
+          await capability.invoke(publicationId, rowPeriod);
+          // Baru SESUDAH backend benar-benar sukses, state/cache diperbarui.
+          //
+          // Viewer Cache persisten (IndexedDB) dibuang LEBIH DULU: tanpa ini,
+          // periode yang sudah dibatalkan dapat hidup lagi dari cache saat
+          // Supabase offline, karena cache adalah fallback loadViewerNationalData().
+          // Kegagalan cleanup lokal BUKAN kegagalan pembatalan database — pembatalan
+          // sudah commit di server dan tidak boleh di-rollback hanya karena IndexedDB
+          // bermasalah, jadi errornya ditangani terpisah sebagai warning.
+          let cacheCleanupFailed = false;
+          try {
+            await Storage.deleteViewerCache(rowPeriod);
+          } catch (cacheError) {
+            cacheCleanupFailed = true;
+            console.error(`Cache Viewer ${rowPeriod} gagal dihapus setelah pembatalan:`, cacheError);
+          }
+          invalidateCancelledPublicationCaches(rowPeriod);
+          await refreshOfficialPeriods();
+          // Bila periode yang dibatalkan sedang ditampilkan, muat ulang dari daftar
+          // official terbaru — Viewer tidak boleh jatuh ke revisi lama periode itu.
+          if (normalizePeriodKeyValue(State.activePeriodKey) === normalizePeriodKeyValue(rowPeriod)) {
+            State.activePeriodKey = newestPeriodKey(State.periods);
+            if (State.runtimeMode === 'viewer') {
+              await loadViewerNationalData({ allowCache: false, periodKey: State.activePeriodKey });
+            }
+          }
+          hideLoadingOverlay();
+          showToast(`Publikasi ${periodLabel} dibatalkan. Periode ini tidak lagi memiliki data resmi.`, 'success');
+          // Pembatalan tetap dinyatakan BERHASIL; cleanup cache lokal dilaporkan terpisah.
+          if (cacheCleanupFailed) {
+            showToast(`Cache Viewer ${periodLabel} gagal dibersihkan di perangkat ini. Muat ulang halaman bila periode tersebut masih terlihat saat offline.`, 'info');
+          }
+          renderSidebar();
+          router();
+        } catch (error) {
+          hideLoadingOverlay();
+          cancelButtons.forEach(btn => { btn.disabled = false; });
+          showToast(safeUserError(error, 'Pembatalan publikasi gagal.'), 'error');
+        } finally {
+          State.publicationBusy = false;
+        }
+      }, { confirmLabel: 'Ya, Batalkan Publish', cancelLabel: 'Kembali' });
     }));
   } catch (error) {
     container.innerHTML = `<div class="alert alert-error">${escapeHtml(safeUserError(error, 'Riwayat publikasi gagal dimuat.'))}</div>`;
