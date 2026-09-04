@@ -824,10 +824,16 @@ select:focus,input:focus{outline:2px solid var(--gold);outline-offset:1px;}
 .simulation-level-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--card-border);border-bottom:1px solid var(--card-border);margin-bottom:11px;}
 .simulation-level-row label{font-size:11px;font-weight:800;color:var(--ink-soft);}.simulation-level-row select{height:34px;min-width:150px;font-size:12px;}
 .simulation-kpi-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;}
-.simulation-kpi-item{display:grid;grid-template-columns:18px minmax(0,1fr) 68px;align-items:center;gap:6px;padding:8px;border:1px solid var(--card-border);border-radius:9px;background:#fff;}
+.simulation-kpi-item{display:grid;grid-template-columns:18px minmax(0,1fr) 80px;align-items:center;gap:6px;padding:8px;border:1px solid var(--card-border);border-radius:9px;background:#fff;}
 .simulation-kpi-item.is-excluded{background:var(--bg-soft);opacity:.72;}.simulation-kpi-item input[type=checkbox]{width:15px;height:15px;accent-color:var(--navy);cursor:pointer;}
 .simulation-kpi-name{min-width:0;font-size:10.5px;font-weight:800;color:var(--navy);line-height:1.2;}.simulation-weight-wrap{display:flex;align-items:center;gap:3px;}
-.simulation-weight-input{width:51px!important;height:30px!important;padding:4px 5px!important;text-align:right;font-size:11px!important;}.simulation-weight-wrap span{font-size:10px;color:var(--ink-soft);font-weight:800;}
+/* Rule global input[type=number] memaksa min-width:160px. width saja kalah, sehingga
+   min-width & max-width WAJIB di-override di sini agar input bobot tetap compact
+   dan tidak keluar dari card. flex:0 0 auto menahan .simulation-weight-wrap (flex)
+   melebarkan input kembali. */
+.simulation-weight-input{width:64px!important;min-width:64px!important;max-width:64px!important;flex:0 0 auto!important;box-sizing:border-box!important;height:30px!important;padding:4px 5px!important;text-align:right;font-size:11px!important;}
+.simulation-weight-wrap{min-width:0;justify-content:flex-end;}
+.simulation-weight-wrap span{font-size:10px;color:var(--ink-soft);font-weight:800;flex:0 0 auto;}
 .simulation-total{display:flex;justify-content:space-between;align-items:center;margin-top:11px;padding:9px 10px;border-radius:9px;background:var(--green-bg);color:var(--green);font-size:12px;font-weight:900;}
 .simulation-total.invalid{background:var(--red-bg);color:var(--red);}.simulation-validation-message{min-height:17px;margin-top:5px;color:var(--ink-soft);font-size:10.5px;font-weight:700;}.simulation-validation-message.invalid{color:var(--red);}
 .simulation-actions{display:flex;justify-content:flex-end;gap:7px;flex-wrap:wrap;margin-top:10px;}.simulation-results-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:10px;}
@@ -7697,15 +7703,17 @@ function simulationKpiEditorHtml(config) {
     </div>`;
   }).join('');
 }
+// UI tabel menampilkan SATU kolom Rank saja = rank hasil simulasi (row.rank).
+// officialRank / deltaRank / simulationDeltaRankHtml SENGAJA dipertahankan di data
+// model & helper (buildSimulationRanking) untuk kebutuhan internal — hanya
+// tampilannya yang dihapus, bukan perhitungannya.
 function simulationResultsTableHtml(level, rows, config) {
   if (!rows.length) return '<div class="simulation-empty">Tidak ada data untuk scope yang dipilih.</div>';
   const selectedKpis = SIMULATION_KPIS.filter(kpi => config.selected[kpi.id]);
   return `<div class="simulation-table-wrap"><table class="simulation-table">
-    <thead><tr><th>Rank Sim</th><th>Rank Resmi</th><th>Δ Rank</th><th>${escapeHtml(simulationLevelLabel(level))}</th>${selectedKpis.map(kpi => `<th>${escapeHtml(kpi.label)}</th>`).join('')}<th>Score Simulasi</th></tr></thead>
+    <thead><tr><th>Rank</th><th>${escapeHtml(simulationLevelLabel(level))}</th>${selectedKpis.map(kpi => `<th>${escapeHtml(kpi.label)}</th>`).join('')}<th>Score Simulasi</th></tr></thead>
     <tbody>${rows.map(row => `<tr>
       <td><strong>#${fmtNumber(row.rank)}</strong></td>
-      <td>${Number.isFinite(row.officialRank) ? `#${fmtNumber(row.officialRank)}` : '-'}</td>
-      <td>${simulationDeltaRankHtml(row.deltaRank)}</td>
       <td class="simulation-name-cell">${escapeHtml(simulationEntityName(level, row))}</td>
       ${selectedKpis.map(kpi => `<td>${simulationKpiDisplay(row, kpi)}</td>`).join('')}
       <td class="simulation-score">${row.simulationScore === null ? '-' : fmtNumber(row.simulationScore, 2)}</td>
@@ -7735,7 +7743,7 @@ function renderSimulationRankingPage() {
         <div class="simulation-actions"><button type="button" class="btn btn-ghost btn-sm" id="simulation-reset">Reset Simulasi</button><button type="button" class="btn btn-primary btn-sm" id="simulation-apply" ${validation.valid ? '' : 'disabled'}>Terapkan Simulasi</button></div>
       </section>
       <section class="panel simulation-results-panel">
-        <div class="simulation-results-head"><div><h2>Hasil Ranking Simulasi — ${escapeHtml(simulationLevelLabel(simulation.level))}</h2><div class="simulation-results-meta">Rank Resmi = ranking menggunakan bobot resmi pada data aktif yang sama.</div></div><span class="simulation-applied-chip">Applied: ${fmtNumber(appliedSelected.length)} KPI • 100%</span></div>
+        <div class="simulation-results-head"><div><h2>Hasil Ranking Simulasi — ${escapeHtml(simulationLevelLabel(simulation.level))}</h2></div><span class="simulation-applied-chip">Applied: ${fmtNumber(appliedSelected.length)} KPI • 100%</span></div>
         ${simulationResultsTableHtml(simulation.level, rows, simulation.appliedConfig)}
       </section>
     </div>`;
