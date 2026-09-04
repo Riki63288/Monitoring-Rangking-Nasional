@@ -8,8 +8,9 @@
   // Pesannya diteruskan apa adanya agar Admin tahu penyebab pastinya
   // (mis. Closing TAT bukan 100, atau periode sudah Closing).
   // Daftar ini WAJIB memuat setiap kode yang di-raise publish_period_snapshot_v1 /
-  // activate_period_snapshot_v1. Kode yang tidak terdaftar akan jatuh ke mapping
-  // errcode P0001 di bawah dan salah tampil sebagai error admin/auth.
+  // activate_period_snapshot_v1 / cancel_period_publication_v1. Kode yang tidak
+  // terdaftar akan jatuh ke mapping errcode 42501/P0001 di bawah dan salah tampil
+  // sebagai error admin/auth.
   const PERIOD_ERROR_PREFIXES = [
     'PERIOD_ALREADY_CLOSING',
     'CLOSING_TAT_INVALID',
@@ -26,6 +27,9 @@
     'INVALID_SCHEMA_VERSION',
     'INVALID_PAYLOAD',
     'INVALID_CUTOFF',
+    'INVALID_PERIOD_KEY',      // cancel: parameter periode bukan format YYYY-MM
+    'PERIOD_MISMATCH',         // cancel: snapshot berada pada periode lain
+    'PUBLICATION_NOT_CURRENT', // cancel: target bukan dataset resmi periode tsb
     'PUBLICATION_NOT_FOUND',
     'AUTH_REQUIRED',
     'ADMIN_REQUIRED'
@@ -318,6 +322,63 @@
   }
 
   /**
+   * BATALKAN PUBLISH — mencabut status resmi (is_period_current) satu publikasi
+   * periode. Seluruh validasi, locking, dan recalculation global-active dilakukan
+   * ATOMIC di dalam SATU RPC backend (cancel_period_publication_v1). Service TIDAK
+   * pernah melakukan UPDATE/DELETE tabel langsung, tidak memanggil RPC kedua, dan
+   * tidak pernah mengaktifkan revisi arsip mana pun sebagai "rollback".
+   *
+   * Zero publikasi resmi pada periode tsb adalah hasil yang VALID.
+   *
+   * @param {string} publicationId id baris published_snapshots (uuid)
+   * @param {string} periodKey     periode kanonik 'YYYY-MM'
+   * @returns {Promise<string>}    id publikasi yang dibatalkan
+   */
+  async function cancelPeriodPublication(publicationId, periodKey) {
+    // Validasi id: sekadar memastikan ada nilai. TIDAK memakai pola uuid buatan
+    // sendiri agar uuid PostgreSQL yang sah tidak pernah ditolak di frontend.
+    const snapshotId = String(publicationId == null ? '' : publicationId).trim();
+    if (!snapshotId) throw new Error('Publikasi yang dibatalkan tidak valid.');
+
+    // Validasi periode memakai pola KETAT yang sama dengan backend ('YYYY-MM').
+    // Sengaja TIDAK memakai normalizePeriodKey() — helper itu longgar dan diam-diam
+    // memotong '2026-09-15' menjadi '2026-09', sehingga kontrak frontend akan
+    // berbeda dari regex RPC dan cancel bisa menyasar periode yang tidak diminta.
+    const canonicalPeriod = String(periodKey == null ? '' : periodKey).trim();
+    if (!PERIOD_KEY_PATTERN.test(canonicalPeriod)) {
+      throw new Error('Periode tidak valid. Gunakan format YYYY-MM.');
+    }
+
+    const { data, error } = await getClient().rpc('cancel_period_publication_v1', {
+      p_snapshot_id: snapshotId,
+      p_period_key: canonicalPeriod
+    });
+
+    if (error) {
+      // Business error backend didahulukan: pesannya sudah spesifik dan tidak boleh
+      // tersamar menjadi "fitur periode belum aktif".
+      if (!periodErrorMessage(error)) {
+        // RPC belum ada di database (migration lama) -> penanda fitur, bukan error admin.
+        const code = typeof error.code === 'string' ? error.code : '';
+        if (code === 'PGRST202' || code === '42883' || isMissingPeriodObject(error)) {
+          throw periodFeatureError();
+        }
+      }
+      throw safeError(error, 'Publikasi periode tidak dapat dibatalkan.');
+    }
+
+    // RPC mengembalikan uuid tunggal; bentuk array ditangani agar aman terhadap
+    // perbedaan serialisasi PostgREST.
+    const row = Array.isArray(data) ? data[0] : data;
+    const cancelledId = row && typeof row === 'object'
+      ? String(row.cancel_period_publication_v1 || row.id || '')
+      : String(row == null ? '' : row);
+    // Tidak ada id yang kembali = tidak ada bukti sukses. Jangan pernah lapor sukses.
+    if (!cancelledId) throw new Error('Pembatalan publikasi tidak mengembalikan hasil.');
+    return cancelledId;
+  }
+
+  /**
    * Riwayat publikasi untuk audit Admin. Bila periodKey diberikan, dibatasi pada
    * periode tersebut. published_by TIDAK PERNAH diminta.
    */
@@ -365,6 +426,7 @@
     getOfficialPeriodSnapshot,
     publishPeriodSnapshot,
     activatePeriodSnapshot,
+    cancelPeriodPublication,
     getPeriodPublicationHistory
   });
 })();
