@@ -931,6 +931,141 @@ revoke all on function public.activate_period_snapshot_v1(uuid) from public;
 grant execute on function public.activate_period_snapshot_v1(uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------
+-- 11b. RPC BATALKAN PUBLISH — cancel_period_publication_v1
+-- ---------------------------------------------------------------------------
+--     TUJUAN: mencabut status RESMI satu periode. Setelah dibatalkan, periode
+--     tersebut BOLEH tidak memiliki publikasi resmi sama sekali (0 current row).
+--
+--     BUKAN rollback / restore / activate-previous. Revisi arsip TIDAK PERNAH
+--     diaktifkan otomatis — itu tetap tugas activate_period_snapshot_v1 yang
+--     perilakunya sama sekali tidak diubah oleh RPC ini.
+--
+--     YANG DIUBAH HANYA SATU KOLOM: is_period_current true -> false.
+--     TIDAK menghapus row, payload_json, maupun history. TIDAK menyentuh
+--     period_status, period_month, period_revision_number, revision_number,
+--     cutoff_date, published_at, maupun published_by.
+--
+--     KONSEKUENSI YANG DISENGAJA:
+--       * period_status tetap 'CLOSING' bila memang Closing, sehingga
+--         period_has_closing_publication() — yang memeriksa SELURUH history dan
+--         bukan hanya baris current — tetap menolak publish MTD berikutnya.
+--         Closing lock TIDAK pernah lolos hanya karena publikasinya dibatalkan.
+--       * period_revision_number baris yang dibatalkan tetap tersimpan, sehingga
+--         MAX(period_revision_number) tidak turun dan publish berikutnya
+--         mendapat nomor berikutnya (Rev 4 dibatalkan -> publish jadi Rev 5).
+--
+--     URUTAN LOCK mengikuti konvensi migration ini tanpa kecuali:
+--       (1) lock_publication_period(period)      <- advisory, per periode
+--       (2) SELECT ... FOR UPDATE pada baris target
+--       (3) recalculate_global_active_publication() -> mengambil global lock
+--     Tidak ada urutan lock baru, sehingga tidak ada deadlock terhadap
+--     publish_period_snapshot_v1 maupun activate_period_snapshot_v1.
+--
+--     INTERAKSI TRIGGER: published_snapshots_activation_guard() hanya bereaksi
+--     pada AKTIVASI (is_active false -> true) dan mengembalikan NEW lebih awal
+--     untuk UPDATE lain, sehingga penurunan is_period_current di sini legal dan
+--     tidak melemahkan invariant trigger mana pun.
+--
+--     CATATAN KODE ERROR: INVALID_PERIOD_KEY, PERIOD_MISMATCH, dan
+--     PUBLICATION_NOT_CURRENT adalah kode BARU. Phase 2B wajib menambahkannya ke
+--     PERIOD_ERROR_PREFIXES pada js/supabase-service.js, jika tidak ketiganya akan
+--     jatuh ke mapping errcode P0001 dan salah tampil sebagai error admin/auth.
+-- ---------------------------------------------------------------------------
+create or replace function public.cancel_period_publication_v1(
+  p_snapshot_id uuid,
+  p_period_key  text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = pg_catalog, public
+as $$
+declare
+  v_period_text text;
+  v_period      date;
+  v_row         public.published_snapshots%rowtype;
+begin
+  -- 11b.1 Auth: wajib login DAN admin. Dijalankan paling awal, sebelum
+  --       parameter apa pun dibaca, agar non-admin tidak dapat menyelidiki
+  --       keberadaan snapshot lewat perbedaan pesan error.
+  if auth.uid() is null then
+    raise exception 'AUTH_REQUIRED: Autentikasi diperlukan.'
+      using errcode = '42501';
+  end if;
+  if not public.is_current_user_admin() then
+    raise exception 'ADMIN_REQUIRED: Akses admin diperlukan.'
+      using errcode = '42501';
+  end if;
+
+  -- 11b.2 Validasi parameter
+  if p_snapshot_id is null then
+    raise exception 'INVALID_PAYLOAD: Snapshot tidak ditemukan.'
+      using errcode = '22023';
+  end if;
+
+  v_period_text := btrim(coalesce(p_period_key, ''));
+  -- Canonical WAJIB 'YYYY-MM'. '2026-9', '2026-13', '2026-09-15', dan teks bebas
+  -- ditolak — tidak ada parser longgar yang berbeda dari konvensi database.
+  if v_period_text !~ '^[0-9]{4}-(0[1-9]|1[0-2])$' then
+    raise exception 'INVALID_PERIOD_KEY: Parameter periode tidak valid (gunakan format YYYY-MM).'
+      using errcode = '22023';
+  end if;
+  -- Konversi ke period_month DATE (tanggal 1 bulan tsb), konsisten dengan
+  -- lock_publication_period() dan kolom period_month. Tidak bergantung tanggal
+  -- browser maupun now().
+  v_period := date_trunc('month', to_date(v_period_text || '-01', 'YYYY-MM-DD'))::date;
+
+  -- 11b.3 (1) period lock. Diambil SEBELUM baris dibaca sehingga cancel vs
+  --       publish vs activate vs cancel pada periode yang sama ter-serialize.
+  perform public.lock_publication_period(v_period);
+
+  -- 11b.4 (2) row lock. Status dibaca DAN dikunci dalam satu langkah, sehingga
+  --       tidak ada celah antara "membaca current" dan "menulis false".
+  select ps.* into v_row
+    from public.published_snapshots ps
+   where ps.id = p_snapshot_id
+   for update;
+
+  if not found then
+    raise exception 'PUBLICATION_NOT_FOUND: Snapshot tidak ditemukan.'
+      using errcode = '22023';
+  end if;
+
+  -- 11b.5 Snapshot ID dan period key harus COCOK KEDUANYA. Mengirim snapshot
+  --       September dengan periodKey Agustus ditolak — tidak ada satu pun dari
+  --       kedua parameter yang dipercaya sendirian.
+  if v_row.period_month is distinct from v_period then
+    raise exception 'PERIOD_MISMATCH: Snapshot tidak sesuai periode % (snapshot berada pada periode %).',
+      v_period_text, coalesce(to_char(v_row.period_month, 'YYYY-MM'), 'tidak diketahui')
+      using errcode = '22023';
+  end if;
+
+  -- 11b.6 Target WAJIB publikasi resmi periode tersebut. Baris arsip (termasuk
+  --       yang sudah pernah dibatalkan) ditolak — pemanggilan kedua TIDAK PERNAH
+  --       dilaporkan sukses.
+  if v_row.is_period_current is distinct from true then
+    raise exception 'PUBLICATION_NOT_CURRENT: Publikasi bukan dataset resmi periode tersebut.'
+      using errcode = '22023';
+  end if;
+
+  -- 11b.7 Operasi utama: HANYA satu kolom yang berubah.
+  update public.published_snapshots ps
+     set is_period_current = false
+   where ps.id = v_row.id;
+
+  -- 11b.8 (3) global-active lock diambil di dalam helper existing. Zero official
+  --       publication adalah hasil yang VALID: bila tidak ada lagi baris current,
+  --       helper mengosongkan is_active dan tidak mengaktifkan arsip mana pun.
+  perform public.recalculate_global_active_publication();
+
+  return p_snapshot_id;
+end;
+$$;
+
+revoke all on function public.cancel_period_publication_v1(uuid, text) from public;
+grant execute on function public.cancel_period_publication_v1(uuid, text) to authenticated;
+
+-- ---------------------------------------------------------------------------
 -- 12. RLS — Viewer hanya boleh membaca publikasi RESMI per period (§26/§31)
 --     Policy existing TIDAK dihapus; policy ini bersifat tambahan (permissive).
 --     RLS TIDAK PERNAH dimatikan.
