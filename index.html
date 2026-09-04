@@ -788,6 +788,59 @@ select:focus,input:focus{outline:2px solid var(--gold);outline-offset:1px;}
 .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px;flex-wrap:wrap;}
 .modal-confirm p{margin-top:0;}
 
+/* ===== Trend Performance (read-only official period history) ===== */
+.ranking-trend-btn{width:32px;height:30px;padding:0;border:1px solid var(--card-border);border-radius:8px;background:#fff;cursor:pointer;font-size:16px;line-height:1;display:inline-flex;align-items:center;justify-content:center;transition:border-color .15s ease,background .15s ease,transform .15s ease;}
+.ranking-trend-btn:hover{background:var(--bg-soft);border-color:var(--gold);transform:translateY(-1px);}
+.ranking-trend-btn:focus-visible{outline:2px solid var(--gold);outline-offset:2px;}
+.modal-box.modal-trend-performance{max-width:760px;padding:22px;}
+.trend-head{padding-right:34px;margin-bottom:14px;}
+.trend-head h2{margin:0;color:var(--navy);font-size:18px;}
+.trend-head-sub{margin-top:4px;color:var(--ink-soft);font-size:12px;}
+.trend-source{display:inline-flex;margin-top:7px;padding:4px 8px;border-radius:999px;background:#eef3fb;color:var(--navy);font-size:10.5px;font-weight:800;}
+.trend-control{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+.trend-control label{font-size:12px;font-weight:800;color:var(--ink-soft);}
+.trend-control select{min-width:210px;height:36px;}
+.trend-chart-wrap{height:280px;border:1px solid var(--card-border);border-radius:10px;background:#fff;padding:12px;margin-bottom:12px;}
+.trend-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;}
+.trend-summary-card{border:1px solid var(--card-border);border-radius:9px;background:var(--bg-soft);padding:10px;min-height:66px;}
+.trend-summary-label{font-size:10px;text-transform:uppercase;letter-spacing:.35px;color:var(--ink-soft);font-weight:800;}
+.trend-summary-value{margin-top:5px;color:var(--navy);font-size:14px;font-weight:900;overflow-wrap:anywhere;}
+.trend-empty,.trend-error{padding:34px 14px;text-align:center;border:1px dashed var(--card-border);border-radius:10px;color:var(--ink-soft);font-size:13px;}
+.trend-error{color:var(--red);background:#fff7f7;}
+.trend-loading{display:flex;align-items:center;justify-content:center;gap:10px;padding:42px 12px;color:var(--ink-soft);font-size:13px;}
+.trend-loading .loading-spinner{width:26px;height:26px;border-width:3px;}
+@media (max-width:640px){.modal-box.modal-trend-performance{padding:16px}.trend-control{align-items:flex-start;flex-direction:column}.trend-control select{width:100%;min-width:0}.trend-chart-wrap{height:240px;padding:8px}.trend-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+
+/* ===== Simulasi Ranking (client-side, tidak mengubah ranking resmi) ===== */
+.simulation-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:13px 15px;margin-bottom:14px;border:1px solid #d8c36e;border-radius:11px;background:#fff9df;color:#5f4a00;}
+.simulation-banner strong{font-size:13px;letter-spacing:.2px;}.simulation-banner span{font-size:11.5px;font-weight:700;}
+.simulation-layout{display:grid;grid-template-columns:minmax(300px,390px) minmax(0,1fr);gap:14px;align-items:start;}
+.simulation-config-panel{position:sticky;top:74px;}.simulation-panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px;}
+.simulation-panel-head h2{margin:0;color:var(--navy);font-size:15px;}.simulation-panel-head p{margin:3px 0 0;color:var(--ink-soft);font-size:11px;}
+.simulation-context{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-bottom:12px;}
+.simulation-context-item{min-width:0;padding:8px 9px;border:1px solid var(--card-border);border-radius:8px;background:var(--bg-soft);}
+.simulation-context-label{display:block;color:var(--ink-faint);font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;}
+.simulation-context-value{display:block;margin-top:3px;color:var(--ink);font-size:11px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.simulation-level-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--card-border);border-bottom:1px solid var(--card-border);margin-bottom:11px;}
+.simulation-level-row label{font-size:11px;font-weight:800;color:var(--ink-soft);}.simulation-level-row select{height:34px;min-width:150px;font-size:12px;}
+.simulation-kpi-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;}
+.simulation-kpi-item{display:grid;grid-template-columns:18px minmax(0,1fr) 68px;align-items:center;gap:6px;padding:8px;border:1px solid var(--card-border);border-radius:9px;background:#fff;}
+.simulation-kpi-item.is-excluded{background:var(--bg-soft);opacity:.72;}.simulation-kpi-item input[type=checkbox]{width:15px;height:15px;accent-color:var(--navy);cursor:pointer;}
+.simulation-kpi-name{min-width:0;font-size:10.5px;font-weight:800;color:var(--navy);line-height:1.2;}.simulation-weight-wrap{display:flex;align-items:center;gap:3px;}
+.simulation-weight-input{width:51px!important;height:30px!important;padding:4px 5px!important;text-align:right;font-size:11px!important;}.simulation-weight-wrap span{font-size:10px;color:var(--ink-soft);font-weight:800;}
+.simulation-total{display:flex;justify-content:space-between;align-items:center;margin-top:11px;padding:9px 10px;border-radius:9px;background:var(--green-bg);color:var(--green);font-size:12px;font-weight:900;}
+.simulation-total.invalid{background:var(--red-bg);color:var(--red);}.simulation-validation-message{min-height:17px;margin-top:5px;color:var(--ink-soft);font-size:10.5px;font-weight:700;}.simulation-validation-message.invalid{color:var(--red);}
+.simulation-actions{display:flex;justify-content:flex-end;gap:7px;flex-wrap:wrap;margin-top:10px;}.simulation-results-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:10px;}
+.simulation-results-head h2{margin:0;color:var(--navy);font-size:15px;}.simulation-results-meta{margin-top:3px;color:var(--ink-soft);font-size:11px;}.simulation-applied-chip{display:inline-flex;padding:5px 9px;border-radius:999px;background:#eef3fb;color:var(--navy);font-size:10px;font-weight:800;}
+.simulation-table-wrap{width:100%;overflow:auto;border:1px solid var(--card-border);border-radius:10px;max-height:68vh;}.simulation-table{width:100%;border-collapse:separate;border-spacing:0;font-size:11.5px;white-space:nowrap;}
+.simulation-table th{position:sticky;top:0;z-index:2;padding:9px 8px;background:var(--navy);color:#fff;text-align:center;font-size:9.5px;text-transform:uppercase;letter-spacing:.2px;}
+.simulation-table td{padding:8px;border-bottom:1px solid var(--card-border);text-align:center;background:#fff;}.simulation-table tbody tr:nth-child(even) td{background:#fafaf8;}.simulation-table tbody tr:hover td{background:#fff9e8;}
+.simulation-table .simulation-name-cell{text-align:left;min-width:170px;white-space:normal;font-weight:800;color:var(--navy);}.simulation-rank-up{color:var(--green);font-weight:900;}.simulation-rank-down{color:var(--red);font-weight:900;}.simulation-rank-flat{color:var(--ink-faint);font-weight:900;}.simulation-score{font-weight:900;color:var(--navy);}
+.simulation-empty{padding:44px 15px;text-align:center;color:var(--ink-soft);font-size:13px;border:1px dashed var(--card-border);border-radius:10px;background:var(--bg-soft);}
+@media (max-width:1050px){.simulation-layout{grid-template-columns:1fr}.simulation-config-panel{position:static}.simulation-kpi-grid{grid-template-columns:repeat(3,minmax(0,1fr));}}
+@media (max-width:720px){.simulation-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.simulation-context{grid-template-columns:1fr}.simulation-level-row{align-items:flex-start;flex-direction:column}.simulation-level-row select{width:100%}}
+@media (max-width:460px){.simulation-kpi-grid{grid-template-columns:1fr}.simulation-actions .btn{flex:1}}
+
 /* ===== Drawer (side panel detail salesman) ===== */
 .drawer-overlay{position:fixed;inset:0;background:rgba(28,31,38,0.4);z-index:1000;animation:fade-in .18s ease;}
 .drawer-box{
@@ -1356,10 +1409,15 @@ const State = {
   // Dibatasi ukurannya (lihat cachePutBounded) agar tidak membengkak.
   detailKpiHierarchyCache: new Map(),
   phaseHierarchyCache: new Map(),
+  // Trend hanya menyimpan payload official secara bounded dan hasil series ringan.
+  trendPayloadCache: new Map(),
+  trendSeriesCache: new Map(),
+  simulation: null,
+  lastRankingLevel: null,
   pageAbortController: null // E: lifecycle listener per halaman
 };
 
-const LS_KEYS = { SIDEBAR_COLLAPSED: 'rkpi_sidebar_collapsed', TABLE_PAGESIZE: 'rkpi_table_pagesize' };
+const LS_KEYS = { SIDEBAR_COLLAPSED: 'rkpi_sidebar_collapsed', TABLE_PAGESIZE: 'rkpi_table_pagesize', RANKING_SIMULATION: 'rankingSimulationConfigV1' };
 
 /* ============================================================
    UTILITY FUNCTIONS
@@ -1902,7 +1960,9 @@ const LocalPrefs = {
   getSidebarCollapsed() { try { return localStorage.getItem(LS_KEYS.SIDEBAR_COLLAPSED) === '1'; } catch (e) { return false; } },
   setSidebarCollapsed(v) { try { localStorage.setItem(LS_KEYS.SIDEBAR_COLLAPSED, v ? '1' : '0'); } catch (e) {} },
   getPageSize(tableKey) { try { const v = localStorage.getItem(LS_KEYS.TABLE_PAGESIZE + '_' + tableKey); return v === 'all' ? 'all' : (v ? parseInt(v, 10) : 25); } catch (e) { return 25; } },
-  setPageSize(tableKey, v) { try { localStorage.setItem(LS_KEYS.TABLE_PAGESIZE + '_' + tableKey, String(v)); } catch (e) {} }
+  setPageSize(tableKey, v) { try { localStorage.setItem(LS_KEYS.TABLE_PAGESIZE + '_' + tableKey, String(v)); } catch (e) {} },
+  getRankingSimulation() { try { const raw = localStorage.getItem(LS_KEYS.RANKING_SIMULATION); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } },
+  setRankingSimulation(value) { try { localStorage.setItem(LS_KEYS.RANKING_SIMULATION, JSON.stringify(value)); } catch (e) {} }
 };
 
 /* ============================================================
@@ -3883,6 +3943,14 @@ class DataTable {
 
   handleDelegatedClick(e) {
     const target = e.target;
+    const trendButton = target.closest('.ranking-trend-btn');
+    if (trendButton) {
+      e.preventDefault(); e.stopPropagation();
+      const trendRow = trendButton.closest('tbody tr');
+      const row = trendRow ? this._rowMap.get(trendRow.dataset.rowKey) : null;
+      if (row) openTrendPerformanceModal(trendButton.dataset.trendLevel, row);
+      return;
+    }
     const tr = target.closest('tbody tr.dt-row-clickable');
     if (tr && this._refs && this._refs.tbody && this._refs.tbody.contains(tr)) {
       if (target.closest('button,input,select,a,label')) return;
@@ -5720,6 +5788,7 @@ const SIDEBAR_ITEMS = [
   { path: '/ranking-ass', icon: '👔', label: 'Ranking ASS', group: 'RANKING' },
   { path: '/ranking-salesman', icon: '🧑‍💼', label: 'Ranking Salesman', group: 'RANKING' },
   { path: '/detail-kpi', icon: '📈', label: 'Detail KPI', group: 'RANKING' },
+  { path: '/simulasi-ranking', icon: '🧪', label: 'Simulasi Ranking', group: 'ANALISIS' },
   { path: '/upload', icon: '⬆️', label: 'Upload Data', group: 'ADMIN', adminOnly: true },
   { path: '/data-sumber', icon: '🗂️', label: 'Data Sumber Excel', group: 'ADMIN', adminOnly: true },
   { path: '/belum-eligible', icon: '⚠️', label: 'Data Belum Memenuhi Syarat', group: 'ADMIN', adminOnly: true },
@@ -5754,22 +5823,27 @@ function buildBreadcrumb(path, params) {
 const ROUTES = {
   '/dashboard': renderDashboardPage, '/ranking-phase': renderRankingPhasePage, '/ranking-regional': renderRankingRegionalPage, '/ranking-cabang': renderRankingCabangPage, '/ranking-depo': renderRankingDepoPage,
   '/ranking-ass': renderRankingAssPage, '/ranking-salesman': renderRankingSalesmanPage, '/detail-kpi': renderDetailKpiPage,
+  '/simulasi-ranking': renderSimulationRankingPage,
   '/belum-eligible': renderBelumEligiblePage, '/upload': renderUploadPage, '/pengaturan': renderPengaturanPage,
   '/data-sumber': renderDataSumberPage, '/publication-history': renderPublicationHistoryPage
 };
 const WIRE_FNS = {
   '/dashboard': wireDashboardPage, '/ranking-phase': wireRankingPhasePage, '/ranking-regional': wireRankingRegionalPage, '/ranking-cabang': wireRankingCabangPage, '/ranking-depo': wireRankingDepoPage,
   '/ranking-ass': wireRankingAssPage, '/ranking-salesman': wireRankingSalesmanPage, '/detail-kpi': wireDetailKpiPage,
+  '/simulasi-ranking': wireSimulationRankingPage,
   '/belum-eligible': wireBelumEligiblePage, '/upload': wireUploadPage, '/pengaturan': wirePengaturanPage,
   '/data-sumber': wireDataSumberPage, '/publication-history': wirePublicationHistoryPage
 };
 
-const LEGACY_BLOCKED_PATHS = new Set(['/dashboard', '/ranking-phase', '/ranking-regional', '/ranking-cabang', '/ranking-depo', '/ranking-ass', '/ranking-salesman', '/detail-kpi', '/belum-eligible']);
+const LEGACY_BLOCKED_PATHS = new Set(['/dashboard', '/ranking-phase', '/ranking-regional', '/ranking-cabang', '/ranking-depo', '/ranking-ass', '/ranking-salesman', '/detail-kpi', '/simulasi-ranking', '/belum-eligible']);
 function router() {
   if (State.pageAbortController) State.pageAbortController.abort(); // E: putuskan seluruh listener global halaman sebelumnya
   State.pageAbortController = new AbortController();
   State.pageSignal = State.pageAbortController.signal;
   let { path, params } = parseHash();
+  const rankingLevelByPath = { '/ranking-phase': 'phase', '/ranking-regional': 'regional', '/ranking-cabang': 'cabang', '/ranking-depo': 'depo', '/ranking-ass': 'ass', '/ranking-salesman': 'salesman' };
+  if (rankingLevelByPath[path]) State.lastRankingLevel = rankingLevelByPath[path];
+  else if (path === '/detail-kpi' && ['phase', 'regional', 'cabang', 'depo', 'ass', 'salesman'].includes(params.get('level'))) State.lastRankingLevel = params.get('level');
   if (isAdminRoute(path) && !State.isAdmin) {
     showToast('Akses admin diperlukan.', 'error');
     history.replaceState(null, document.title, `${location.pathname}${location.search}#/dashboard`);
@@ -6725,6 +6799,15 @@ function rankingPercentColumn(key, label, groupKey, groupLabel, groupClass, kpiI
     excludeFromJpg: options.excludeFromJpg === true
   };
 }
+const TREND_RANKING_LEVELS = new Set(['phase', 'regional', 'cabang', 'depo', 'ass', 'salesman']);
+function rankingTrendColumn(level) {
+  if (!TREND_RANKING_LEVELS.has(level)) return null;
+  return {
+    key: '__trend', label: 'Trend', align: 'center', sortable: false, width: 64,
+    headerBand: 'result', excludeFromCsv: true, excludeFromJpg: true,
+    render: () => `<button type="button" class="ranking-trend-btn" data-trend-level="${level}" title="Lihat Trend Performance" aria-label="Lihat Trend Performance">📈</button>`
+  };
+}
 // Definisi filter header (rentang numerik) untuk seluruh subkolom KPI, dipakai bersama oleh
 // Ranking Phase/Regional/Depo/ASS/Salesman. Key SAMA PERSIS dengan key kolom di rankingColumns()
 // agar ikon filter otomatis muncul tepat di subheader kolom terkait (bukan di header grup).
@@ -6915,7 +6998,626 @@ function rankingColumns(opts) {
     { key: 'category.label', label: 'Kategori', align: 'center', sortable: false, headerBand: 'result', width: 128,
       render: r => categoryBadge(r.category), csvValue: r => r.category ? r.category.label : '' }
   );
+  const trendColumn = rankingTrendColumn(opts.trendLevel);
+  if (trendColumn) cols.push(trendColumn);
   return filterRankingColumnsByMode(cols);
+}
+
+/* ============================================================
+   TREND PERFORMANCE — OFFICIAL PUBLISHED PERIOD, READ-ONLY
+   ============================================================ */
+const TREND_KPI_OPTIONS = Object.freeze({
+  finalScore: { label: 'Final Score', percent: false, decimals: 2, value: row => row && row.finalScore !== null && row.finalScore !== undefined && Number.isFinite(Number(row.finalScore)) ? Number(row.finalScore) : null },
+  scJks: { label: 'SC/JKS', percent: true, decimals: 2, value: row => rankingKpiActual(row, 'scJks') },
+  geofencing: { label: 'GEO', percent: true, decimals: 2, value: row => rankingKpiActual(row, 'geofencing') },
+  avgEc: { label: 'AVG EC', percent: false, decimals: 0, value: row => rankingAverageEc(row) },
+  roaCb: { label: '%ROA', percent: true, decimals: 2, value: row => rankingKpiActual(row, 'roaCb') },
+  hitRate: { label: 'EC VS CALL TOTAL', percent: true, decimals: 2, value: row => rankingKpiActual(row, 'hitRate') },
+  revenue: { label: '%OMZ', percent: true, decimals: 2, value: row => rankingKpiActual(row, 'revenue') },
+  strata2: { label: '%EPB2', percent: true, decimals: 2, value: row => rankingKpiActual(row, 'strata2') }
+});
+const TREND_HISTORY_LIMIT = 12;
+const TREND_HISTORY_CANDIDATE_LIMIT = 60;
+const TREND_PAYLOAD_CACHE_LIMIT = 4;
+const TREND_SERIES_CACHE_LIMIT = 24;
+
+function trendNormalizeIdentityPart(value) {
+  return String(value === null || value === undefined ? '' : value).trim().replace(/\s+/g, ' ').toUpperCase();
+}
+function trendEntityIdentity(level, row) {
+  if (!row || !TREND_RANKING_LEVELS.has(level)) return null;
+  if (level === 'phase') {
+    const name = row.key || (row.meta && row.meta.phase) || row.phaseName;
+    return { key: `phase:${trendNormalizeIdentityPart(name)}`, display: String(name || '-') };
+  }
+  if (level === 'regional') {
+    const name = row.key || (row.meta && row.meta.region);
+    return { key: `regional:${trendNormalizeIdentityPart(name)}`, display: String((row.meta && row.meta.region) || name || '-') };
+  }
+  if (level === 'cabang') {
+    const name = row.key || (row.meta && row.meta.cabang);
+    return { key: `cabang:${trendNormalizeIdentityPart(name)}`, display: String((row.meta && row.meta.cabang) || name || '-') };
+  }
+  if (level === 'depo') {
+    const meta = row.meta || {};
+    const code = trendNormalizeIdentityPart(meta.kodeDepo);
+    const fallback = [meta.region, meta.depo].map(trendNormalizeIdentityPart).join('|');
+    return { key: code ? `depo-code:${code}` : `depo-name:${fallback}`, display: String(meta.depo || row.key || '-') };
+  }
+  if (level === 'ass') {
+    const meta = row.meta || {};
+    const nik = trendNormalizeIdentityPart(meta.nikAss);
+    const fallback = [meta.region, meta.namaAss].map(trendNormalizeIdentityPart).join('|');
+    return { key: nik ? `ass-nik:${nik}` : `ass-name:${fallback}`, display: String(meta.namaAss || row.key || '-') };
+  }
+  const rec = row.rec || {};
+  const code = trendNormalizeIdentityPart(rec.kodeSalesman);
+  const fallback = [rec.namaSalesmanAwal || rec.namaSalesman, rec.nikAss, rec.kodeDepo || rec.depo, rec.region]
+    .map(trendNormalizeIdentityPart).join('|');
+  return { key: code ? `salesman-code:${code}` : `salesman-name:${fallback}`, display: String(rec.namaSalesman || rec.namaSalesmanAwal || '-') };
+}
+function trendPayloadSettings(payload) {
+  const supplied = payload && payload.settings ? payload.settings : {};
+  return {
+    ...defaultSettings(),
+    ...supplied,
+    weights: { ...getDefaultWeights(), ...(supplied.weights || {}) },
+    statusSalesmanFilter: Array.isArray(supplied.statusSalesmanFilter) && supplied.statusSalesmanFilter.length
+      ? supplied.statusSalesmanFilter.filter(status => STATUS_SALESMAN_ALL.includes(status))
+      : [...STATUS_SALESMAN_DEFAULT]
+  };
+}
+function withTrendPayloadContext(payload, fn) {
+  const previous = {
+    masterCabang: State.masterCabang,
+    vacantEntries: State.vacantEntries,
+    vacantKeySet: State.vacantKeySet
+  };
+  const master = payload && payload.masterCabang && Array.isArray(payload.masterCabang.rows) ? payload.masterCabang : { rows: [] };
+  const masterRows = master.rows.map(row => ({ ...row }));
+  const vacantEntries = payload && Array.isArray(payload.vacantEntries) ? payload.vacantEntries.map(entry => ({ ...entry })) : [];
+  State.masterCabang = { ...master, rows: masterRows, byKodeDepo: new Map(masterRows.map(row => [row.kodeDepo, row])) };
+  State.vacantEntries = vacantEntries;
+  State.vacantKeySet = new Set(vacantEntries.map(entry => entry.id));
+  try {
+    return fn();
+  } finally {
+    State.masterCabang = previous.masterCabang;
+    State.vacantEntries = previous.vacantEntries;
+    State.vacantKeySet = previous.vacantKeySet;
+  }
+}
+function trendHierarchyRows(level, hierarchy) {
+  if (!hierarchy) return [];
+  if (level === 'regional') return hierarchy.byRegion || [];
+  if (level === 'cabang') return hierarchy.byCabang || [];
+  if (level === 'depo') return hierarchy.byDepo || [];
+  if (level === 'ass') return hierarchy.byAss || [];
+  if (level === 'salesman') return hierarchy.salesmanScored || [];
+  return [];
+}
+function trendFindHistoricalRow(level, payload, targetIdentity, scopeContext) {
+  return withTrendPayloadContext(payload, () => {
+    const snapshot = canonicalSnapshot(payload.activeSnapshot);
+    const rawRecords = snapshot && Array.isArray(snapshot.rawRecords) ? snapshot.rawRecords : [];
+    const scopedRecords = applyGlobalScope(rawRecords, scopeContext.phaseSet, scopeContext.regionSet)
+      .filter(record => scopeContext.statuses.has(getEffectiveSalesmanStatus(record)));
+    const settings = trendPayloadSettings(payload);
+
+    if (level === 'phase') {
+      const matchingNames = new Set(scopedRecords
+        .map(phaseValueOfRecord)
+        .filter(name => `phase:${trendNormalizeIdentityPart(name)}` === targetIdentity.key));
+      if (matchingNames.size !== 1) return null;
+      const phaseName = Array.from(matchingNames)[0];
+      const phaseRecords = scopedRecords.filter(record => phaseValueOfRecord(record) === phaseName);
+      const hierarchy = buildHierarchy(validateDataset(phaseRecords), settings);
+      if (!hierarchy.national) return null;
+      return { ...hierarchy.national, key: phaseName, meta: { phase: phaseName }, phaseName };
+    }
+
+    const hierarchy = buildHierarchy(validateDataset(scopedRecords), settings);
+    const matches = trendHierarchyRows(level, hierarchy)
+      .filter(candidate => {
+        const identity = trendEntityIdentity(level, candidate);
+        return identity && identity.key === targetIdentity.key;
+      });
+    return matches.length === 1 ? matches[0] : null;
+  });
+}
+function trendAllKpiValues(row) {
+  const values = {};
+  Object.entries(TREND_KPI_OPTIONS).forEach(([key, option]) => {
+    const value = row ? option.value(row) : null;
+    values[key] = value === null || value === undefined || !Number.isFinite(Number(value)) ? null : Number(value);
+  });
+  return values;
+}
+function trendOfficialPeriodLabel(period, compact) {
+  const key = normalizePeriodKeyValue(period && period.periodKey);
+  if (!key) return '-';
+  const status = normalizePeriodStatusValue(period.periodStatus) || PERIOD_STATUS_MTD;
+  if (!compact) return periodOptionLabel(key, status);
+  const month = (PERIOD_MONTH_NAMES_ID[Number(key.slice(5, 7)) - 1] || '').slice(0, 3);
+  return `${month} ${key.slice(2, 4)}${status === PERIOD_STATUS_MTD ? ' MTD' : ''}`;
+}
+function trendCacheKeyForPeriod(period) {
+  return [period.periodKey, period.id || '', period.periodRevisionNumber || period.revisionNumber || ''].join('|');
+}
+async function trendFetchOfficialPayload(period) {
+  const cacheKey = trendCacheKeyForPeriod(period);
+  if (State.trendPayloadCache.has(cacheKey)) return State.trendPayloadCache.get(cacheKey);
+  const remote = await window.SupabaseService.getOfficialPeriodSnapshot(period.periodKey);
+  if (!remote || !remote.payload_json || remote.is_period_current !== true) {
+    throw new Error('Official period payload tidak tersedia.');
+  }
+  validatePublishedPayload(remote.payload_json);
+  return cachePutBounded(State.trendPayloadCache, cacheKey, remote.payload_json, TREND_PAYLOAD_CACHE_LIMIT);
+}
+async function trendMapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+  const workerCount = Math.min(Math.max(1, limit), items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+async function buildOfficialTrendSeries(level, row) {
+  if (!TREND_RANKING_LEVELS.has(level)) throw new Error('Level Trend tidak valid.');
+  if (!State.periodFeatureReady || !State.supabaseReady || !window.SupabaseService
+      || typeof window.SupabaseService.getOfficialPeriods !== 'function'
+      || typeof window.SupabaseService.getOfficialPeriodSnapshot !== 'function') {
+    throw new Error('Official Period History belum tersedia.');
+  }
+  const activePeriodKey = normalizePeriodKeyValue(State.activePeriodKey) || snapshotPeriodKey(State.activeSnapshot);
+  if (!activePeriodKey) throw new Error('Periode aktif tidak tersedia.');
+  const targetIdentity = trendEntityIdentity(level, row);
+  if (!targetIdentity || !targetIdentity.key) throw new Error('Identitas entity tidak tersedia.');
+
+  const officialPeriods = (await window.SupabaseService.getOfficialPeriods(TREND_HISTORY_CANDIDATE_LIMIT))
+    .filter(period => period && period.isPeriodCurrent === true && isValidPeriodKey(period.periodKey) && period.periodKey <= activePeriodKey)
+    .sort((a, b) => a.periodKey.localeCompare(b.periodKey))
+    .slice(-TREND_HISTORY_LIMIT);
+  const scopeContext = {
+    phaseSet: new Set(State.activePhaseFilters || []),
+    regionSet: new Set(State.activeRegionFilters || []),
+    statuses: new Set(getActiveStatusSalesmanFilter())
+  };
+  const revisionSignature = officialPeriods.map(period => trendCacheKeyForPeriod(period)).join('~');
+  const scopeSignature = [
+    Array.from(scopeContext.phaseSet).sort().join('|'),
+    Array.from(scopeContext.regionSet).sort().join('|'),
+    Array.from(scopeContext.statuses).sort().join('|')
+  ].join('~');
+  const seriesCacheKey = [level, targetIdentity.key, activePeriodKey, scopeSignature, revisionSignature].join('::');
+  if (State.trendSeriesCache.has(seriesCacheKey)) return State.trendSeriesCache.get(seriesCacheKey);
+
+  const points = await trendMapWithConcurrency(officialPeriods, 2, async period => {
+    const payload = await trendFetchOfficialPayload(period);
+    const historicalRow = trendFindHistoricalRow(level, payload, targetIdentity, scopeContext);
+    return {
+      periodKey: period.periodKey,
+      periodStatus: normalizePeriodStatusValue(period.periodStatus) || PERIOD_STATUS_MTD,
+      label: trendOfficialPeriodLabel(period, false),
+      shortLabel: trendOfficialPeriodLabel(period, true),
+      values: trendAllKpiValues(historicalRow)
+    };
+  });
+  const result = { level, entity: targetIdentity, activePeriodKey, points };
+  return cachePutBounded(State.trendSeriesCache, seriesCacheKey, result, TREND_SERIES_CACHE_LIMIT);
+}
+function trendFormatValue(value, option) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '-';
+  return option.percent ? fmtPercent(Number(value), option.decimals) : fmtNumber(Number(value), option.decimals);
+}
+function trendDeltaDirection(delta) {
+  if (delta === null || delta === undefined || !Number.isFinite(Number(delta))) return 'none';
+  const normalizedDelta = Math.round(Number(delta) * 1e12) / 1e12;
+  if (Math.abs(normalizedDelta) <= 0.01) return 'stable';
+  return normalizedDelta > 0.01 ? 'up' : 'down';
+}
+function trendSummary(points, kpiKey) {
+  const valid = points.filter(point => Number.isFinite(point.values[kpiKey]));
+  if (!valid.length) return null;
+  const latest = valid[valid.length - 1];
+  const previous = valid.length > 1 ? valid[valid.length - 2] : null;
+  const best = valid.reduce((winner, point) => point.values[kpiKey] >= winner.values[kpiKey] ? point : winner, valid[0]);
+  const delta = previous ? latest.values[kpiKey] - previous.values[kpiKey] : null;
+  const direction = trendDeltaDirection(delta);
+  const trend = direction === 'none' ? 'Belum cukup data'
+    : direction === 'stable' ? '→ Stabil'
+    : direction === 'up' ? '↑ Naik' : '↓ Turun';
+  return { latest, previous, best, delta, trend };
+}
+function renderTrendPerformanceView(series, kpiKey) {
+  const option = TREND_KPI_OPTIONS[kpiKey] || TREND_KPI_OPTIONS.finalScore;
+  const content = document.getElementById('trend-performance-content');
+  if (!content) return;
+  const summary = trendSummary(series.points, kpiKey);
+  if (!summary) {
+    if (ChartRegistry['trend-performance-chart']) {
+      ChartRegistry['trend-performance-chart'].destroy();
+      delete ChartRegistry['trend-performance-chart'];
+    }
+    content.innerHTML = '<div class="trend-empty">Belum ada data historis untuk entity/KPI ini.</div>';
+    return;
+  }
+  const deltaDirection = trendDeltaDirection(summary.delta);
+  const deltaText = summary.delta === null ? '-'
+    : `${summary.delta > 0 ? '+' : ''}${fmtNumber(summary.delta, option.decimals)}${kpiKey === 'avgEc' ? '' : ' pts'} ${deltaDirection === 'stable' ? '→' : deltaDirection === 'up' ? '↑' : '↓'}`;
+  content.innerHTML = `
+    <div class="trend-chart-wrap"><canvas id="trend-performance-chart" aria-label="Grafik Trend ${escapeHtml(option.label)}" role="img"></canvas></div>
+    <div class="trend-summary-grid">
+      <div class="trend-summary-card"><div class="trend-summary-label">Latest</div><div class="trend-summary-value">${trendFormatValue(summary.latest.values[kpiKey], option)}</div></div>
+      <div class="trend-summary-card"><div class="trend-summary-label">Vs Previous</div><div class="trend-summary-value">${deltaText}</div></div>
+      <div class="trend-summary-card"><div class="trend-summary-label">Trend</div><div class="trend-summary-value">${summary.trend}</div></div>
+      <div class="trend-summary-card"><div class="trend-summary-label">Best Month</div><div class="trend-summary-value">${escapeHtml(summary.best.label)}</div></div>
+    </div>`;
+  renderChart('trend-performance-chart', {
+    type: 'line',
+    data: {
+      labels: series.points.map(point => point.shortLabel),
+      datasets: [{
+        label: option.label,
+        data: series.points.map(point => point.values[kpiKey]),
+        borderColor: '#1f355e',
+        backgroundColor: 'rgba(205,164,52,.15)',
+        pointBackgroundColor: '#cda434',
+        pointBorderColor: '#1f355e',
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        borderWidth: 2.5,
+        tension: .25,
+        spanGaps: false,
+        fill: true
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: items => items.length ? series.points[items[0].dataIndex].label : '',
+            label: item => `${option.label}: ${trendFormatValue(item.raw, option)}`
+          }
+        }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#667085', maxRotation: 0, autoSkip: true } },
+        y: {
+          beginAtZero: false,
+          ticks: { color: '#667085', callback: value => option.percent ? `${fmtNumber(Number(value), 0)}%` : fmtNumber(Number(value), option.decimals) },
+          grid: { color: 'rgba(31,53,94,.08)' }
+        }
+      }
+    }
+  });
+}
+async function openTrendPerformanceModal(level, row) {
+  const identity = trendEntityIdentity(level, row);
+  if (!identity) { showToast('Trend Performance tidak dapat dibuka untuk entity ini.', 'error'); return; }
+  const overlay = openModal(`
+    <div class="trend-head">
+      <h2>TREND PERFORMANCE — ${escapeHtml(identity.display)}</h2>
+      <div class="trend-head-sub">Perkembangan performa bulanan sampai periode yang sedang dianalisis.</div>
+      <span class="trend-source">Sumber: Official Published Period</span>
+    </div>
+    <div id="trend-performance-shell"><div class="trend-loading"><div class="loading-spinner"></div><span>Memuat Trend Performance...</span></div></div>`,
+    { extraClass: 'modal-trend-performance' });
+  const closeButton = overlay.querySelector('[data-act="close"]');
+  if (closeButton) { closeButton.textContent = '×'; closeButton.title = 'Tutup'; closeButton.setAttribute('aria-label', 'Tutup Trend Performance'); }
+  try {
+    const series = await buildOfficialTrendSeries(level, row);
+    if (!overlay.isConnected) return;
+    const shell = overlay.querySelector('#trend-performance-shell');
+    shell.innerHTML = `
+      <div class="trend-control"><label for="trend-kpi-select">KPI:</label>
+        <select id="trend-kpi-select">${Object.entries(TREND_KPI_OPTIONS).map(([key, option]) => `<option value="${key}">${escapeHtml(option.label)}</option>`).join('')}</select>
+      </div>
+      <div id="trend-performance-content"></div>`;
+    const selector = shell.querySelector('#trend-kpi-select');
+    selector.addEventListener('change', () => renderTrendPerformanceView(series, selector.value));
+    renderTrendPerformanceView(series, 'finalScore');
+  } catch (error) {
+    console.error('Trend Performance gagal dimuat:', error);
+    if (!overlay.isConnected) return;
+    const shell = overlay.querySelector('#trend-performance-shell');
+    if (shell) shell.innerHTML = '<div class="trend-error">Gagal memuat Trend Performance.</div>';
+  }
+}
+
+/* ============================================================
+   SIMULASI RANKING — what-if client-side, terisolasi dari ranking resmi
+   ============================================================ */
+const SIMULATION_LEVELS = Object.freeze([
+  { id: 'phase', label: 'Phase' },
+  { id: 'regional', label: 'Regional' },
+  { id: 'cabang', label: 'Cabang' },
+  { id: 'depo', label: 'Depo' },
+  { id: 'ass', label: 'ASS' },
+  { id: 'salesman', label: 'Salesman' }
+]);
+const SIMULATION_KPIS = Object.freeze([
+  { id: 'scJks', label: 'SC/JKS', percent: true },
+  { id: 'geofencing', label: 'GEO', percent: true },
+  { id: 'roaCb', label: '%ROA', percent: true },
+  { id: 'hitRate', label: 'EC VS CALL TOTAL', percent: true },
+  { id: 'avgEcAch', label: 'AVG EC', percent: false },
+  { id: 'revenue', label: '%OMZ', percent: true },
+  { id: 'strata2', label: '%EPB2', percent: true }
+]);
+
+function simulationOfficialActiveWeights() {
+  const normalize = source => {
+    if (!source || typeof source !== 'object') return null;
+    const weights = {};
+    let total = 0;
+    for (const kpi of SIMULATION_KPIS) {
+      const weight = Number(source[kpi.id]);
+      if (!Number.isFinite(weight) || weight < 0 || weight > 100) return null;
+      weights[kpi.id] = weight;
+      total += weight;
+    }
+    return Number.isFinite(total) && Math.abs(total - 100) <= 0.01 ? weights : null;
+  };
+  return normalize(State && State.settings && State.settings.weights) || normalize(getDefaultWeights()) || { ...getDefaultWeights() };
+}
+function simulationDefaultConfig() {
+  const officialWeights = simulationOfficialActiveWeights();
+  const selected = {}, weights = {};
+  SIMULATION_KPIS.forEach(kpi => {
+    selected[kpi.id] = Number(officialWeights[kpi.id]) > 0;
+    weights[kpi.id] = Number(officialWeights[kpi.id]);
+  });
+  return { selected, weights };
+}
+function simulationCloneConfig(config) {
+  const source = config || simulationDefaultConfig();
+  return { selected: { ...source.selected }, weights: { ...source.weights } };
+}
+function simulationConfigValidation(config) {
+  const selectedMap = config && config.selected ? config.selected : {};
+  const weightMap = config && config.weights ? config.weights : {};
+  const selectedIds = SIMULATION_KPIS.filter(kpi => selectedMap[kpi.id] === true).map(kpi => kpi.id);
+  const checkedWeightsValid = selectedIds.every(id => {
+    const value = Number(weightMap[id]);
+    return Number.isFinite(value) && value > 0 && value <= 100;
+  });
+  const total = selectedIds.reduce((sum, id) => sum + Number(weightMap[id]), 0);
+  const normalizedTotalDelta = Math.round((total - 100) * 1e12) / 1e12;
+  const totalValid = Number.isFinite(total) && Math.abs(normalizedTotalDelta) <= 0.01;
+  const valid = selectedIds.length > 0 && checkedWeightsValid && totalValid;
+  let message = 'Konfigurasi valid dan siap diterapkan.';
+  if (!selectedIds.length) message = 'Pilih minimal satu KPI.';
+  else if (!checkedWeightsValid) message = 'KPI yang dipilih wajib memiliki bobot angka lebih dari 0 hingga 100.';
+  else if (!totalValid) message = 'Total bobot KPI terpilih wajib 100%.';
+  return { valid, selectedIds, total, message };
+}
+function simulationNormalizeStoredConfig(stored) {
+  if (!stored || stored.version !== 1 || !stored.config || !stored.config.selected || !stored.config.weights) return null;
+  const config = { selected: {}, weights: {} };
+  for (const kpi of SIMULATION_KPIS) {
+    if (!Object.prototype.hasOwnProperty.call(stored.config.selected, kpi.id) || !Object.prototype.hasOwnProperty.call(stored.config.weights, kpi.id)) return null;
+    if (typeof stored.config.selected[kpi.id] !== 'boolean') return null;
+    const rawWeight = stored.config.weights[kpi.id];
+    const weight = Number(rawWeight);
+    config.selected[kpi.id] = stored.config.selected[kpi.id];
+    if (config.selected[kpi.id] && (typeof rawWeight !== 'number' || !Number.isFinite(weight) || weight <= 0 || weight > 100)) return null;
+    config.weights[kpi.id] = typeof rawWeight === 'number' && Number.isFinite(weight) && weight >= 0 && weight <= 100 ? weight : NaN;
+  }
+  return simulationConfigValidation(config).valid ? config : null;
+}
+function ensureSimulationState() {
+  if (State.simulation) return State.simulation;
+  const stored = LocalPrefs.getRankingSimulation();
+  const appliedConfig = simulationNormalizeStoredConfig(stored) || simulationDefaultConfig();
+  const storedLevel = stored && SIMULATION_LEVELS.some(level => level.id === stored.level) ? stored.level : null;
+  const level = storedLevel || (SIMULATION_LEVELS.some(item => item.id === State.lastRankingLevel) ? State.lastRankingLevel : 'regional');
+  State.simulation = { draftConfig: simulationCloneConfig(appliedConfig), appliedConfig: simulationCloneConfig(appliedConfig), level };
+  return State.simulation;
+}
+function persistSimulationState() {
+  const simulation = ensureSimulationState();
+  LocalPrefs.setRankingSimulation({ version: 1, level: simulation.level, config: simulationCloneConfig(simulation.appliedConfig) });
+}
+function simulationLevelLabel(level) {
+  const item = SIMULATION_LEVELS.find(candidate => candidate.id === level);
+  return item ? item.label : 'Regional';
+}
+function simulationRowsForLevel(level) {
+  const hierarchy = State.hierarchy;
+  if (!hierarchy) return [];
+  if (level === 'phase') return getPhaseRankingRows();
+  if (level === 'regional') return hierarchy.byRegion || [];
+  if (level === 'cabang') return hierarchy.byCabang || [];
+  if (level === 'depo') return hierarchy.byDepo || [];
+  if (level === 'ass') return hierarchy.byAss || [];
+  if (level === 'salesman') return hierarchy.salesmanScored || [];
+  return [];
+}
+function simulationNameGetter(level) {
+  if (level === 'phase') return row => row.meta && row.meta.phase;
+  if (level === 'regional') return row => row.meta && row.meta.region;
+  if (level === 'cabang') return row => row.meta && row.meta.cabang;
+  if (level === 'depo') return row => row.meta && row.meta.depo;
+  if (level === 'ass') return row => row.meta && row.meta.namaAss;
+  return row => row.rec && row.rec.namaSalesman;
+}
+function simulationEntityName(level, row) {
+  return String(simulationNameGetter(level)(row) || '-');
+}
+function simulationEntityKey(level, row) {
+  const identity = trendEntityIdentity(level, row);
+  return identity && identity.key ? identity.key : '';
+}
+function simulationScoreForRow(row, config) {
+  if (!row || row.finalScore === null || row.finalScore === undefined || !Number.isFinite(Number(row.finalScore))) return null;
+  return SIMULATION_KPIS.reduce((total, kpi) => {
+    if (!config.selected[kpi.id]) return total;
+    const officialScore = row.kpi && row.kpi[kpi.id] ? row.kpi[kpi.id].score : null;
+    return total + (Number.isFinite(Number(officialScore)) ? Number(officialScore) * Number(config.weights[kpi.id]) / 100 : 0);
+  }, 0);
+}
+function buildSimulationRanking(level, config) {
+  const sourceRows = simulationRowsForLevel(level);
+  const nameGetter = simulationNameGetter(level);
+  const officialRanked = rankList(sourceRows.map(row => ({ ...row })), nameGetter);
+  const identityCounts = new Map();
+  officialRanked.forEach(row => {
+    const key = simulationEntityKey(level, row);
+    if (key) identityCounts.set(key, (identityCounts.get(key) || 0) + 1);
+  });
+  const officialRanks = new Map();
+  officialRanked.forEach(row => {
+    const key = simulationEntityKey(level, row);
+    if (key && identityCounts.get(key) === 1) officialRanks.set(key, { rank: row.rank, score: row.finalScore });
+  });
+  const simulationRanked = rankList(sourceRows.map(row => {
+    const simulationScore = simulationScoreForRow(row, config);
+    return { ...row, officialFinalScore: row.finalScore, simulationScore, finalScore: simulationScore };
+  }), nameGetter);
+  return simulationRanked.map(row => {
+    const official = officialRanks.get(simulationEntityKey(level, row));
+    const officialRank = official ? official.rank : null;
+    return {
+      ...row,
+      officialRank,
+      officialFinalScore: official ? official.score : row.officialFinalScore,
+      deltaRank: Number.isFinite(officialRank) ? officialRank - row.rank : null
+    };
+  });
+}
+function simulationKpiActual(row, kpiId) {
+  return kpiId === 'avgEcAch' ? rankingAverageEc(row) : rankingKpiActual(row, kpiId);
+}
+function simulationKpiDisplay(row, kpi) {
+  const value = simulationKpiActual(row, kpi.id);
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '-';
+  return kpi.percent ? fmtPercent(Number(value), 2) : fmtNumber(Number(value), 0);
+}
+function simulationDeltaRankHtml(delta) {
+  if (!Number.isFinite(delta) || delta === 0) return '<span class="simulation-rank-flat">—</span>';
+  return delta > 0 ? `<span class="simulation-rank-up">↑${fmtNumber(delta)}</span>` : `<span class="simulation-rank-down">↓${fmtNumber(Math.abs(delta))}</span>`;
+}
+function simulationActivePeriodLabel() {
+  const snapshot = State.activeSnapshot || {};
+  const key = normalizePeriodKeyValue(State.activePeriodKey) || snapshotPeriodKey(snapshot);
+  const status = normalizePeriodStatusValue(snapshot.periodStatus) || PERIOD_STATUS_MTD;
+  return key ? periodOptionLabel(key, status) : '-';
+}
+function simulationKpiEditorHtml(config) {
+  return SIMULATION_KPIS.map(kpi => {
+    const checked = config.selected[kpi.id] === true;
+    const weight = Number(config.weights[kpi.id]);
+    return `<div class="simulation-kpi-item ${checked ? '' : 'is-excluded'}" data-simulation-kpi="${kpi.id}">
+      <input type="checkbox" class="simulation-kpi-check" data-kpi="${kpi.id}" ${checked ? 'checked' : ''} aria-label="Gunakan KPI ${escapeHtml(kpi.label)}">
+      <span class="simulation-kpi-name">${escapeHtml(kpi.label)}</span>
+      <label class="simulation-weight-wrap"><input type="number" class="simulation-weight-input" data-kpi="${kpi.id}" min="0" max="100" step="0.01" value="${Number.isFinite(weight) ? escapeHtml(String(weight)) : ''}" ${checked ? '' : 'disabled'} aria-label="Bobot ${escapeHtml(kpi.label)}"><span>%</span></label>
+    </div>`;
+  }).join('');
+}
+function simulationResultsTableHtml(level, rows, config) {
+  if (!rows.length) return '<div class="simulation-empty">Tidak ada data untuk scope yang dipilih.</div>';
+  const selectedKpis = SIMULATION_KPIS.filter(kpi => config.selected[kpi.id]);
+  return `<div class="simulation-table-wrap"><table class="simulation-table">
+    <thead><tr><th>Rank Sim</th><th>Rank Resmi</th><th>Δ Rank</th><th>${escapeHtml(simulationLevelLabel(level))}</th>${selectedKpis.map(kpi => `<th>${escapeHtml(kpi.label)}</th>`).join('')}<th>Score Simulasi</th></tr></thead>
+    <tbody>${rows.map(row => `<tr>
+      <td><strong>#${fmtNumber(row.rank)}</strong></td>
+      <td>${Number.isFinite(row.officialRank) ? `#${fmtNumber(row.officialRank)}` : '-'}</td>
+      <td>${simulationDeltaRankHtml(row.deltaRank)}</td>
+      <td class="simulation-name-cell">${escapeHtml(simulationEntityName(level, row))}</td>
+      ${selectedKpis.map(kpi => `<td>${simulationKpiDisplay(row, kpi)}</td>`).join('')}
+      <td class="simulation-score">${row.simulationScore === null ? '-' : fmtNumber(row.simulationScore, 2)}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+function renderSimulationRankingPage() {
+  const simulation = ensureSimulationState();
+  const validation = simulationConfigValidation(simulation.draftConfig);
+  const rows = buildSimulationRanking(simulation.level, simulation.appliedConfig);
+  const appliedSelected = SIMULATION_KPIS.filter(kpi => simulation.appliedConfig.selected[kpi.id]);
+  return `<div class="page-header"><h1>🧪 Simulasi Ranking</h1><p class="page-sub">Modifikasi KPI &amp; Bobot untuk simulasi — tidak mengubah Ranking resmi.</p></div>
+    <div class="simulation-banner"><strong>🧪 MODE SIMULASI — Tidak mengubah Ranking Resmi</strong><span>What-if analysis 100% client-side pada data aktif.</span></div>
+    <div class="simulation-layout">
+      <section class="panel simulation-config-panel">
+        <div class="simulation-panel-head"><div><h2>Konfigurasi Simulasi</h2><p>Perubahan draft baru dihitung setelah diterapkan.</p></div></div>
+        <div class="simulation-context">
+          <div class="simulation-context-item"><span class="simulation-context-label">Data Aktif</span><span class="simulation-context-value" title="${escapeHtml(simulationActivePeriodLabel())}">${escapeHtml(simulationActivePeriodLabel())}</span></div>
+          <div class="simulation-context-item"><span class="simulation-context-label">Status</span><span class="simulation-context-value" title="${escapeHtml(statusSalesmanFilterLabel())}">${escapeHtml(statusSalesmanFilterLabel())}</span></div>
+          <div class="simulation-context-item"><span class="simulation-context-label">Phase</span><span class="simulation-context-value" title="${escapeHtml(globalPhaseFilterLabel())}">${escapeHtml(globalPhaseFilterLabel())}</span></div>
+          <div class="simulation-context-item"><span class="simulation-context-label">Regional</span><span class="simulation-context-value" title="${escapeHtml(globalRegionFilterLabel())}">${escapeHtml(globalRegionFilterLabel())}</span></div>
+        </div>
+        <div class="simulation-level-row"><label for="simulation-level">Level Analisis</label><select id="simulation-level">${SIMULATION_LEVELS.map(level => `<option value="${level.id}" ${simulation.level === level.id ? 'selected' : ''}>${escapeHtml(level.label)}</option>`).join('')}</select></div>
+        <div class="simulation-kpi-grid">${simulationKpiEditorHtml(simulation.draftConfig)}</div>
+        <div class="simulation-total ${validation.valid ? '' : 'invalid'}" id="simulation-total"><span>TOTAL</span><strong id="simulation-total-value">${Number.isFinite(validation.total) ? fmtNumber(validation.total, 2) : '-'}%</strong></div>
+        <div class="simulation-validation-message ${validation.valid ? '' : 'invalid'}" id="simulation-validation-message">${escapeHtml(validation.message)}</div>
+        <div class="simulation-actions"><button type="button" class="btn btn-ghost btn-sm" id="simulation-reset">Reset Simulasi</button><button type="button" class="btn btn-primary btn-sm" id="simulation-apply" ${validation.valid ? '' : 'disabled'}>Terapkan Simulasi</button></div>
+      </section>
+      <section class="panel simulation-results-panel">
+        <div class="simulation-results-head"><div><h2>Hasil Ranking Simulasi — ${escapeHtml(simulationLevelLabel(simulation.level))}</h2><div class="simulation-results-meta">Rank Resmi = ranking menggunakan bobot resmi pada data aktif yang sama.</div></div><span class="simulation-applied-chip">Applied: ${fmtNumber(appliedSelected.length)} KPI • 100%</span></div>
+        ${simulationResultsTableHtml(simulation.level, rows, simulation.appliedConfig)}
+      </section>
+    </div>`;
+}
+function syncSimulationDraftValidationUi() {
+  const simulation = ensureSimulationState();
+  const validation = simulationConfigValidation(simulation.draftConfig);
+  const totalBox = document.getElementById('simulation-total');
+  const totalValue = document.getElementById('simulation-total-value');
+  const message = document.getElementById('simulation-validation-message');
+  const applyButton = document.getElementById('simulation-apply');
+  if (totalBox) totalBox.classList.toggle('invalid', !validation.valid);
+  if (totalValue) totalValue.textContent = `${Number.isFinite(validation.total) ? fmtNumber(validation.total, 2) : '-'}%`;
+  if (message) { message.textContent = validation.message; message.classList.toggle('invalid', !validation.valid); }
+  if (applyButton) applyButton.disabled = !validation.valid;
+}
+function wireSimulationRankingPage() {
+  const simulation = ensureSimulationState();
+  const levelSelect = document.getElementById('simulation-level');
+  if (levelSelect) levelSelect.addEventListener('change', event => {
+    if (!SIMULATION_LEVELS.some(level => level.id === event.target.value)) return;
+    simulation.level = event.target.value;
+    persistSimulationState();
+    router();
+  });
+  document.querySelectorAll('.simulation-kpi-check').forEach(checkbox => checkbox.addEventListener('change', event => {
+    const id = event.target.dataset.kpi;
+    simulation.draftConfig.selected[id] = event.target.checked;
+    const row = event.target.closest('.simulation-kpi-item');
+    const weightInput = row && row.querySelector('.simulation-weight-input');
+    if (row) row.classList.toggle('is-excluded', !event.target.checked);
+    if (weightInput) weightInput.disabled = !event.target.checked;
+    syncSimulationDraftValidationUi();
+  }));
+  document.querySelectorAll('.simulation-weight-input').forEach(input => input.addEventListener('input', event => {
+    const raw = String(event.target.value || '').trim();
+    simulation.draftConfig.weights[event.target.dataset.kpi] = raw === '' ? NaN : Number(raw);
+    syncSimulationDraftValidationUi();
+  }));
+  const applyButton = document.getElementById('simulation-apply');
+  if (applyButton) applyButton.addEventListener('click', () => {
+    const validation = simulationConfigValidation(simulation.draftConfig);
+    if (!validation.valid) { syncSimulationDraftValidationUi(); return; }
+    simulation.appliedConfig = simulationCloneConfig(simulation.draftConfig);
+    persistSimulationState();
+    router();
+  });
+  const resetButton = document.getElementById('simulation-reset');
+  if (resetButton) resetButton.addEventListener('click', () => {
+    const defaults = simulationDefaultConfig();
+    simulation.draftConfig = simulationCloneConfig(defaults);
+    simulation.appliedConfig = simulationCloneConfig(defaults);
+    persistSimulationState();
+    router();
+  });
 }
 
 /* ============================================================
@@ -7192,6 +7894,7 @@ function wireRankingPhasePage() {
   const table = new DataTable({
     containerId: 'dt-phase', mainRankingScroll: true, exportFilename: 'ranking-phase.csv', searchableKeys: ['meta.phase'],
     columns: rankingColumns({
+      trendLevel: 'phase',
       nameKey: 'meta.phase', nameLabel: 'Phase', showTotalSalesman: false, detailLabel: 'Lihat Regional', rankMedalMode: 'top1',
       nameMetaFn: row => joinMeta([
         formatCountMeta(row.regionCount, 'regional'), formatCountMeta(row.depoCount, 'depo'),
@@ -7232,6 +7935,7 @@ function wireRankingRegionalPage() {
   const table = new DataTable({
     containerId: 'dt-regional', mainRankingScroll: true, exportFilename: 'ranking-regional.csv', searchableKeys: ['meta.region'],
     columns: rankingColumns({
+      trendLevel: 'regional',
       nameKey: 'meta.region', nameLabel: 'Regional', showTotalSalesman: false,
       nameMetaFn: r => joinMeta([formatCountMeta(r.depoCount, 'depo'), formatCountMeta(r.totalSalesman, 'salesman')]),
       extraCols: [
@@ -7275,6 +7979,7 @@ function wireRankingCabangPage() {
   const table = new DataTable({
     containerId: 'dt-cabang', mainRankingScroll: true, exportFilename: 'ranking-cabang.csv', searchableKeys: ['meta.cabang', 'meta.region'],
     columns: rankingColumns({
+      trendLevel: 'cabang',
       nameKey: 'meta.cabang', nameLabel: 'Cabang', showTotalSalesman: false,
       nameMetaFn: r => joinMeta([r.meta.region, formatCountMeta(r.depoCount, 'depo'), formatCountMeta(r.totalSalesman, 'salesman')]),
       extraCols: [
@@ -7335,6 +8040,7 @@ function wireRankingDepoPage(params) {
   const table = new DataTable({
     containerId: 'dt-depo', mainRankingScroll: true, exportFilename: 'ranking-depo.csv', searchableKeys: ['meta.depo', 'meta.region', 'meta.kodeDepo'],
     columns: rankingColumns({
+      trendLevel: 'depo',
       nameKey: 'meta.depo', nameLabel: 'Nama Depo', showTotalSalesman: false,
       nameMetaFn: r => joinMeta([r.meta.kodeDepo, r.meta.region, formatCountMeta(r.totalSalesman, 'salesman')]),
       extraCols: [
@@ -7416,6 +8122,7 @@ function wireRankingAssPage(params) {
   const table = new DataTable({
     containerId: 'dt-ass', mainRankingScroll: true, exportFilename: 'ranking-ass.csv', searchableKeys: ['meta.namaAss', 'meta.nikAss', 'meta.depo', 'meta.region'],
     columns: rankingColumns({
+      trendLevel: 'ass',
       nameKey: 'meta.namaAss', nameLabel: 'Nama ASS', showTotalSalesman: false,
       nameMetaFn: r => joinMeta([formatNikMeta(r.meta.nikAss), formatCountMeta(r.totalSalesman, 'salesman')]),
       extraCols: [
@@ -7471,7 +8178,7 @@ function wireRankingSalesmanPage(params) {
   const ranked = decorateRankingComparison(rankList(list, x => x.rec.namaSalesman), 'salesman', scope, value);
   const table = new DataTable({
     containerId: 'dt-salesman', mainRankingScroll: true, exportFilename: 'ranking-salesman.csv', searchableKeys: ['rec.namaSalesman', 'rec.kodeSalesman', 'rec.namaAss', 'rec.depo', 'rec.region'],
-    columns: rankingColumns({ nameKey: 'rec.namaSalesman', nameLabel: 'Nama Salesman', showTotalSalesman: false, selectionEnabled: true,
+    columns: rankingColumns({ trendLevel: 'salesman', nameKey: 'rec.namaSalesman', nameLabel: 'Nama Salesman', showTotalSalesman: false, selectionEnabled: true,
       nameMetaFn: r => rankingSalesmanCompactMeta(r.rec), nameRenderFn: r => renderRankingSalesmanNameCell(r.rec), extraCols: [
       { key: 'rec.kodeSalesman', label: 'Kode Salesman', render: r => escapeHtml(r.rec.kodeSalesman), sortable: true },
       { key: 'rec.namaAss', label: 'Nama ASS', render: r => escapeHtml(r.rec.namaAss), sortable: true },
