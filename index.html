@@ -12623,6 +12623,20 @@ function kpiAssignmentPeriodOptions() {
   if (active) keys.add(active);
   return [...keys].sort();
 }
+// Pilihan khusus "Mulai Periode": periode existing + bulan kalender lokal saat ini sampai +12 bulan.
+// Hanya menghasilkan key konfigurasi; tidak membuat snapshot, publication, atau row storage apa pun.
+function getKpiEffectiveFromPeriodOptions(referenceDate = new Date()) {
+  const keys = new Set(kpiAssignmentPeriodOptions().map(normalizePeriodKeyValue).filter(Boolean));
+  const validReference = referenceDate instanceof Date && Number.isFinite(referenceDate.getTime()) ? referenceDate : new Date();
+  const startYear = validReference.getFullYear();
+  const startMonth = validReference.getMonth();
+  for (let offset = 0; offset <= 12; offset++) {
+    const monthDate = new Date(startYear, startMonth + offset, 1);
+    const periodKey = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}`;
+    if (isValidPeriodKey(periodKey)) keys.add(periodKey);
+  }
+  return [...keys].sort((a, b) => a.localeCompare(b));
+}
 function periodHasActiveOfficialPublication(periodKey) {
   if (State.isLocalDemo) return false;
   const entry = findPeriodEntry(periodKey);
@@ -12697,7 +12711,13 @@ function openApplyKpiConfigurationModal(draft) {
   if (!validation.valid) { showToast(validation.message, 'error'); return; }
   const current = currentKpiConfiguration();
   const periods = kpiAssignmentPeriodOptions();
+  const effectiveFromPeriods = getKpiEffectiveFromPeriodOptions();
   const activePeriod = snapshotPeriodKey(State.activeSnapshot) || normalizePeriodKeyValue(State.activePeriodKey) || periods[periods.length - 1] || '';
+  const now = new Date();
+  const currentCalendarPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const defaultEffectiveFrom = effectiveFromPeriods.includes(currentCalendarPeriod) && !periodHasActiveOfficialPublication(currentCalendarPeriod)
+    ? currentCalendarPeriod
+    : (effectiveFromPeriods.includes(activePeriod) ? activePeriod : (effectiveFromPeriods[0] || ''));
   const optionsHtml = periods.map(periodKey => {
     const published = periodHasActiveOfficialPublication(periodKey);
     return `<label class="kpi-period-option ${published ? 'is-published' : ''}"><input type="checkbox" class="kpi-period-check" value="${periodKey}" ${periodKey === activePeriod && !published ? 'checked' : ''} ${published ? 'disabled' : ''}><span>${escapeHtml(periodMonthLabel(periodKey))}</span>${published ? '<small>Sudah Published</small>' : ''}</label>`;
@@ -12707,7 +12727,7 @@ function openApplyKpiConfigurationModal(draft) {
     <div class="kpi-apply-diffs">${kpiConfigurationDiffHtml(current, draft)}</div>
     <div class="kpi-apply-modes">
       <div class="kpi-apply-mode"><label class="kpi-apply-mode-head"><input type="radio" name="kpi-apply-mode" value="period" checked> Periode Tertentu</label><div class="kpi-period-options">${optionsHtml || '<span class="muted">Belum ada periode yang tersedia.</span>'}</div></div>
-      <div class="kpi-apply-mode"><label class="kpi-apply-mode-head"><input type="radio" name="kpi-apply-mode" value="effectiveFrom"> Mulai Periode</label><div style="margin-top:10px"><label>Berlaku mulai: <select id="kpi-effective-from">${periods.map(key => `<option value="${key}" ${key === activePeriod ? 'selected' : ''}>${escapeHtml(periodMonthLabel(key))}</option>`).join('')}</select></label><div class="settings-note">Berlaku untuk periode berikutnya sampai ada konfigurasi baru.</div></div></div>
+      <div class="kpi-apply-mode"><label class="kpi-apply-mode-head"><input type="radio" name="kpi-apply-mode" value="effectiveFrom"> Mulai Periode</label><div style="margin-top:10px"><label>Berlaku mulai: <select id="kpi-effective-from">${effectiveFromPeriods.map(key => `<option value="${key}" ${key === defaultEffectiveFrom ? 'selected' : ''}>${escapeHtml(periodMonthLabel(key))}${periodHasActiveOfficialPublication(key) ? ' — Sudah Published' : ''}</option>`).join('')}</select></label><div class="settings-note">Berlaku untuk periode berikutnya sampai ada konfigurasi baru.</div></div></div>
     </div>
     <div class="kpi-apply-error" id="kpi-apply-error"></div>
     <div class="modal-actions"><button class="btn btn-ghost" data-act="close">Batalkan</button><button class="btn btn-primary" id="confirm-kpi-apply">Terapkan</button></div>`;
