@@ -120,11 +120,8 @@ body{margin:0;font-family:var(--font);background:var(--bg);color:var(--ink);min-
   background:var(--card);border-bottom:1px solid var(--card-border);
   padding:12px 26px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;position:sticky;top:0;z-index:50;
 }
-.topbar-titles{flex:1;min-width:0;}
-.topbar-title{font-size:16px;font-weight:800;color:var(--ink);}
-.breadcrumb{font-size:11.5px;color:var(--ink-faint);margin-top:2px;}
-.breadcrumb a{color:var(--ink-soft);text-decoration:none;}
-.breadcrumb a:hover{color:var(--navy);text-decoration:underline;}
+/* Judul halaman + breadcrumb utama DIHAPUS dari seluruh menu (lihat renderTopbar).
+   Breadcrumb modal drill-down memakai class .drilldown-breadcrumbs dan tidak terpengaruh. */
 .topbar-status{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-soft);background:var(--bg-soft);padding:6px 12px;border-radius:20px;}
 .topbar-phase-filter{display:flex;align-items:center;gap:10px;flex-shrink:0;}
 /* PERIOD SELECTOR — compact, satu item per bulan. Scope-nya berbeda dari Global Filter. */
@@ -157,19 +154,30 @@ body{margin:0;font-family:var(--font);background:var(--bg);color:var(--ink);min-
 .topbar-status-popover .status-opt-count{margin-left:auto;font-size:11px;font-weight:800;color:var(--ink-soft);}
 .topbar-status-popover .dt-filter-option{justify-content:space-between;}
 .topbar-vacant-warning{flex-basis:100%;order:99;background:#fdeceb;color:#b33327;border:1px solid #f3c8c4;border-radius:8px;padding:6px 12px;font-size:11.5px;font-weight:800;margin-top:8px;}
-/* TOPBAR 2 BARIS — pengelompokan eksplisit, BUKAN mengandalkan auto-wrap flex.
-   .topbar-controls adalah kolom; setiap baris adalah flex row tersendiri sehingga
-   Row 1 (Periode/Data/Phase/Regional) dan Row 2 (Status/Mode/Perbarui/Login) tidak
-   pernah saling tertukar berapa pun lebar viewport. Wrap hanya terjadi DI DALAM
-   satu baris. Warning VACANT tetap child langsung #topbar (flex-basis:100%;order:99)
-   sehingga selalu full-width di bawah kedua baris. */
-.topbar-controls{display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex:0 1 auto;min-width:0;}
-.topbar-controls-row{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;min-width:0;}
-/* Urutan sudah benar dari urutan DOM; order legacy dinetralkan agar tidak menggeser
-   anggota baris (mis. tombol Data melompat ke depan Periode di bawah 900px). */
+/* TOPBAR SATU BARIS — seluruh control berada dalam satu flex row dengan urutan DOM:
+   Periode -> Data (Dashboard saja) -> Phase -> Regional -> Status Salesman -> Mode/Perbarui/Login.
+   Pada desktop normal muat satu baris; pada viewport sempit dibiarkan WRAP natural
+   (bukan horizontal scroll). Warning VACANT tetap child langsung #topbar
+   (flex-basis:100%;order:99) sehingga selalu full-width di bawah. */
+.topbar-controls{display:flex;flex-direction:row;align-items:center;gap:6px;flex:1 1 auto;min-width:0;}
+.topbar-controls-row{display:flex;align-items:center;justify-content:flex-start;gap:6px;flex-wrap:wrap;min-width:0;width:100%;}
 .topbar-controls-row > *{order:0;}
-@media (max-width:900px){.topbar-global-filter-btn{max-width:100%;}.topbar-period-select{max-width:170px;}}
-@media (max-width:760px){.topbar-controls{align-items:stretch;width:100%;flex-basis:100%;}.topbar-controls-row{justify-content:flex-start;}}
+.topbar-auth-actions{margin-left:auto;display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;}
+/* Kompak agar desktop 1366px ke atas muat satu baris. Teks panjang dipotong ellipsis
+   (title attribute tetap membawa teks penuh), BUKAN memaksa horizontal scroll. */
+.topbar-controls-row .btn-sm{padding:0 9px;font-size:12px;}
+.topbar-controls-row .topbar-period-label{font-size:11.5px;}
+.topbar-controls-row .topbar-period-select{max-width:190px;font-size:12px;}
+.topbar-controls-row .topbar-global-filter-btn,
+.topbar-controls-row .topbar-status-btn{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.topbar-controls-row .topbar-data-summary{min-height:30px;font-size:11.5px;}
+.topbar-controls-row .runtime-badge{font-size:11px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* Pemangkasan label hanya dilakukan saat ruang benar-benar menipis, supaya teks tidak
+   terpotong sia-sia pada desktop lebar. Teks penuh tetap tersedia via title attribute. */
+@media (max-width:1400px){.topbar-controls-row .topbar-global-filter-btn,.topbar-controls-row .topbar-status-btn{max-width:200px;}}
+@media (max-width:1200px){.topbar-controls-row .topbar-global-filter-btn,.topbar-controls-row .topbar-status-btn{max-width:160px;}.topbar-controls-row .topbar-period-select{max-width:170px;}}
+@media (max-width:900px){.topbar-controls-row .topbar-global-filter-btn,.topbar-controls-row .topbar-status-btn{max-width:100%;}}
+@media (max-width:760px){.topbar-controls{align-items:stretch;width:100%;flex-basis:100%;}.topbar-auth-actions{margin-left:0;}}
 .topbar-status .dot{width:7px;height:7px;border-radius:50%;background:var(--green);}
 
 .topbar-data-summary{
@@ -248,7 +256,8 @@ body{margin:0;font-family:var(--font);background:var(--bg);color:var(--ink);min-
 /* ===== Page Header ===== */
 .page-header h1{margin:0 0 4px;font-size:21px;font-weight:800;}
 .page-sub{margin:0 0 16px;color:var(--ink-soft);font-size:13px;}
-.dashboard-page-header{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;}
+/* Judul halaman sudah dihapus; header Dashboard kini hanya membawa action chip/tombol. */
+.dashboard-page-header{display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px;}
 .dashboard-page-header-actions{flex-shrink:0;}
 @media (max-width:640px){.dashboard-page-header{flex-direction:column;}}
 
@@ -508,9 +517,22 @@ select:focus,input:focus{outline:2px solid var(--gold);outline-offset:1px;}
 .btn-xs{padding:4px 8px;font-size:11px;}
 
 /* ===== KPI Info Panel ===== */
-.kpi-panel{margin-bottom:16px;}
-.kpi-panel-toggle{width:100%;text-align:left;display:flex;justify-content:space-between;align-items:center;background:var(--bg-soft);border:1px solid var(--card-border);color:var(--navy);padding:12px 16px;border-radius:var(--radius-sm);cursor:pointer;font-weight:800;font-size:13px;}
-.kpi-panel-body{background:var(--card);border:1px solid var(--card-border);border-top:none;padding:16px;border-radius:0 0 var(--radius-sm) var(--radius-sm);}
+.kpi-panel{margin-bottom:10px;}
+/* COMPACT UTILITY ROW (Ranking): VACANT + periode ringkas + toggle Metode & Bobot KPI.
+   Disusun natural kiri->kanan, wrap ke baris berikutnya pada viewport sempit,
+   tidak pernah memaksa horizontal scroll. */
+.ranking-utility-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0;}
+.ranking-utility-row .ru-chip{display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:5px 10px;border-radius:999px;font-size:11.5px;font-weight:700;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid var(--card-border);background:var(--bg-soft);color:var(--ink-soft);}
+.ranking-utility-row .ru-chip-warn{background:#fdeceb;border-color:#f3c8c4;color:#b33327;font-weight:800;}
+.ranking-utility-row .ru-chip-period{background:#f3f8fd;border-color:#c9dff3;color:#245a94;}
+.ranking-utility-row .ru-chip-note{background:#fff7d6;border-color:#ead68b;color:#765600;}
+.kpi-panel-toggle{width:100%;text-align:left;display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--bg-soft);border:1px solid var(--card-border);color:var(--navy);padding:12px 16px;border-radius:var(--radius-sm);cursor:pointer;font-weight:800;font-size:13px;}
+.ranking-utility-row .kpi-panel-toggle{width:auto;flex:0 1 auto;min-width:0;padding:5px 11px;border-radius:999px;font-size:11.5px;gap:6px;}
+.ranking-utility-row .kpi-panel-toggle span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.kpi-panel-body{background:var(--card);border:1px solid var(--card-border);padding:14px;border-radius:var(--radius-sm);margin-top:8px;}
+@media (max-width:720px){
+  .ranking-utility-row .ru-chip,.ranking-utility-row .kpi-panel-toggle{font-size:11px;}
+}
 .kpi-info-groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;}
 .kpi-info-group-title{font-weight:800;color:var(--navy);margin-bottom:8px;font-size:13px;}
 .kpi-info-item{margin-bottom:10px;font-size:12px;}
@@ -613,7 +635,7 @@ select:focus,input:focus{outline:2px solid var(--gold);outline-offset:1px;}
 .dt-header-filter-toggle:hover{background:rgba(31,41,55,0.08);color:var(--navy);}
 .dt-header-filter-toggle.is-active{color:#1f2937;background:#e6f0fb;box-shadow:inset 0 0 0 1px #8fb8e3;}
 .dt-header-filter-toggle svg{width:12.5px;height:12.5px;display:block;pointer-events:none;}
-/* Label multi-baris KHUSUS (saat ini hanya EC VS CALL TOTAL). Label lain tetap satu baris. */
+/* Label multi-baris KHUSUS (opsional per label). Label lain tetap satu baris. */
 .dt-header-multiline{display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.12;text-align:center;font-size:9.5px;letter-spacing:.15px;}
 .dt-header-multiline > span{white-space:nowrap;display:block;}
 
@@ -665,7 +687,7 @@ select:focus,input:focus{outline:2px solid var(--gold);outline-offset:1px;}
 .dt-table.has-grouped-header thead th:not(.dt-sticky-column){overflow:hidden;text-overflow:ellipsis;}
 .dt-table.has-grouped-header tbody td[title]{cursor:help;}
 
-/* ===== Modal drill-down Phase → Regional → Depo → ASS → Salesman ===== */
+/* ===== Modal drill-down Phase → Regional → Cabang → ASS → Depo → Salesman ===== */
 .modal-box.modal-ranking-drilldown{
   width:calc(100vw - 42px);max-width:1760px;padding:20px 20px 18px;
 }
@@ -1332,9 +1354,10 @@ const APP_CONFIG = {
   STORE_MASTER_CABANG: 'masterCabang',
   STORE_VIEWER_CACHE: 'viewerCache',
   CURRENT_DATA_SCHEMA_VERSION: 5,
-  // Formula current: hanya AVG EC ÷ TOTAL CALL ESUITE.
+  // Formula current: hanya AVG EC ÷ TOTAL CALL ESUITE (salesman),
+  // agregasi Depo ke atas = RATIO OF SUMS pada populasi salesman berpasangan valid.
   CURRENT_HIT_RATE_SOURCE: 'totalCallEsuite',
-  CURRENT_HIT_RATE_FORMULA_VERSION: 'ec_vs_call_esuite_ratio_v1',
+  CURRENT_HIT_RATE_FORMULA_VERSION: 'ec_vs_call_esuite_paired_ratio_v2',
   CURRENT_TAT_SOURCE: 'tatMtd',
   CURRENT_TAT_FORMULA_VERSION: 'achievement_div_tat_v1',
   STORE_SETTINGS: 'settings',
@@ -1408,7 +1431,7 @@ const APP_CONFIG = {
       numeratorField: 'roa', denominatorField: 'cb',
       info: '≥90% Perfect, 85-89.99% Good, <85% Perlu Ditingkatkan.',
       categoryFn: (v) => v >= 90 ? { label: 'Perfect', cls: 'cat-perfect' } : v >= 85 ? { label: 'Good', cls: 'cat-good' } : { label: 'Perlu Ditingkatkan', cls: 'cat-bad' } },
-    { id: 'hitRate', label: 'EC vs Call Total', group: 'productivity', groupLabel: 'Productivity', defaultWeight: 10,
+    { id: 'hitRate', label: 'Hit Rate EC', group: 'productivity', groupLabel: 'Productivity', defaultWeight: 10,
       formula: 'AVG EC ÷ TOTAL CALL ESUITE × 100%', computeSalesman: (r, _avgEcTarget, formulaModel) => { const ratio = safeDivide(r.avgEc, hitRateDenominatorForRecord(r, formulaModel)); return ratio === null ? null : ratio * 100; },
       numeratorField: 'avgEc', denominatorField: 'totalCallEsuite',
       info: '100% Perfect, 80-99.99% Sangat Bagus, 70-79.99% Good, <70% Perlu Ditingkatkan.',
@@ -1417,17 +1440,17 @@ const APP_CONFIG = {
       formula: 'AVG EC ÷ 25 × 100%', computeSalesman: (r, target) => safeDivide(r.avgEc, target) === null ? null : safeDivide(r.avgEc, target) * 100,
       numeratorField: 'avgEc', denominatorField: null,
       info: 'Target AVG EC = 25 per hari (dapat diubah di Pengaturan KPI).' },
-    { id: 'revenue', label: 'Total Omset', group: 'revenue', groupLabel: 'Revenue Total', defaultWeight: 20,
+    { id: 'revenue', label: 'Total Omset', group: 'revenue', groupLabel: 'Penjualan', defaultWeight: 20,
       formula: 'Aktual: SUM(MTD Oms FM) ÷ SUM(Tgt Oms FM) × 100% | Score: %OMZ ÷ %TAT MTD × 100%', salesmanField: 'pctAchRevenue',
       numeratorField: 'mtdOmsFm', denominatorField: 'tgtOmsFm',
       info: 'Nominal revenue ditampilkan sebagai informasi, tidak dipakai langsung sebagai score.' },
-    { id: 'strata2', label: 'EPB Strata 2', group: 'revenue', groupLabel: 'Revenue Total', defaultWeight: 10,
+    { id: 'strata2', label: 'EPB Strata 2', group: 'revenue', groupLabel: 'Penjualan', defaultWeight: 10,
       formula: 'Aktual: SUM(ACH EPB POIN + ROA) ÷ SUM(TGT EPB STRATA 2) × 100% | Score: %EPB2 ÷ %TAT MTD × 100%',
       numeratorField: 'achEpbPoinRoa', denominatorField: 'tgtEpbStrata2',
       info: 'Status "IS ACHIEVE ST 2?" hanya informasi tambahan, tidak dipakai sebagai score.' }
   ],
 
-  GROUP_LABELS: { proseskerja: 'Proses Kerja', productivity: 'Productivity', revenue: 'Revenue Total' },
+  GROUP_LABELS: { proseskerja: 'Proses Kerja', productivity: 'Productivity', revenue: 'Penjualan' },
 
   // SATU-SATUNYA sumber kebenaran kategori Final Score. Urutan menurun; getFinalScoreCategory()
   // mengambil entri pertama yang memenuhi score >= min.
@@ -2097,7 +2120,7 @@ const COUNTIF_INDICATORS = [
   { id: 'geofencing', kpiId: 'geofencing', label: 'Geofencing', type: 'percent', getValue: row => countifKpiActual(row, 'geofencing') },
   { id: 'avgEc', kpiId: 'avgEcAch', label: 'AVG EC', type: 'plain', getValue: row => rankingAverageEc(row) },
   { id: 'roaCb', kpiId: 'roaCb', label: 'ROA', type: 'percent', getValue: row => countifKpiActual(row, 'roaCb') },
-  { id: 'hitRate', kpiId: 'hitRate', label: 'EC vs Call Total', type: 'percent', getValue: row => countifKpiActual(row, 'hitRate') },
+  { id: 'hitRate', kpiId: 'hitRate', label: 'Hit Rate EC', type: 'percent', getValue: row => countifKpiActual(row, 'hitRate') },
   { id: 'tgtOmz', kpiId: 'revenue', label: 'TGT OMZ', type: 'money', getValue: row => countifRevenueTarget(row) },
   { id: 'omzet', kpiId: 'revenue', label: 'OMZET', type: 'money', getValue: row => countifRevenueActual(row) },
   { id: 'pctOmz', kpiId: 'revenue', label: '% OMZ', type: 'percent', getValue: row => countifKpiActual(row, 'revenue') },
@@ -2609,6 +2632,36 @@ function hitRateDenominatorForRecord(record, formulaModel) {
   // hierarchy, Trend, dan comparison selalu mengirim model explicit.
   if (Object.prototype.hasOwnProperty.call(record, 'effectiveTotalCallDay')) return positiveFiniteCallNumber(record.effectiveTotalCallDay);
   return positiveFiniteCallNumber(record.totalCallEsuite);
+}
+/* ------------------------------------------------------------
+   AVG SC — SUPPORTING METRIC (BUKAN KPI)
+   Sumber: TOTAL CALL ESUITE (kolom W) apa adanya, TIDAK dibagi HK,
+   TIDAK memakai TOTAL CALL/DAY (kolom S), tidak punya bobot/score/threshold.
+   Nilainya = denominator Hit Rate EC pada model formula yang berlaku,
+   sehingga selalu reconcile dengan Hit Rate yang ditampilkan.
+   ------------------------------------------------------------ */
+// AVG SC user-facing = LITERAL TOTAL CALL ESUITE (kolom W). Tidak pernah kolom S / TOTAL CALL/DAY,
+// tidak pernah Effective Total Call, tidak dibagi HK, dan artinya TIDAK berubah mengikuti
+// formula model Hit Rate periode mana pun (current maupun historical).
+function avgScEsuiteForRecord(record) {
+  return record ? positiveFiniteCallNumber(record.totalCallEsuite) : null;
+}
+// Denominator populasi berpasangan = AVG SC (W) yang sama. Sums hasilnya HANYA dikonsumsi oleh
+// aggregation 'paired_ratio_of_sums' (model current v2, yang denominator resminya memang W);
+// model historical/legacy tetap memakai denominator formula-nya sendiri lewat hitRateDenominatorForRecord().
+function pairedHitRateDenominator(record) {
+  return avgScEsuiteForRecord(record);
+}
+function pairedHitRateNumerator(record) {
+  if (!record) return null;
+  const value = Number(record.avgEc);
+  return Number.isFinite(value) ? value : null;
+}
+// AVG SC untuk baris agregat (Depo ke atas) = rata-rata aritmatika salesman berpasangan valid.
+function avgScEsuiteForGroupSums(sums) {
+  if (!sums) return null;
+  const count = Number(sums.pairedHitRateCount);
+  return count > 0 ? Number(sums.pairedHitRateScSum) / count : null;
 }
 function prepareLocalEffectiveTotalCallSnapshot(snapshot) {
   if (!snapshot || snapshot.__officialPublished === true || !Array.isArray(snapshot.rawRecords)) return snapshot;
@@ -3198,7 +3251,7 @@ function aggregateByGroup(eligibleRecords, allRecords, keyFn, metaFn, settings) 
     if (!groups.has(key)) {
       groups.set(key, {
         key, meta: metaFn(rec), totalSalesman: 0, eligibleSalesman: 0, notEligibleSalesman: 0,
-        sums: { achScVsJks: 0, tgtScJks: 0, geofencing: 0, roa: 0, cb: 0, avgEc: 0, totalCallDay: 0, totalCallEsuite: 0, effectiveTotalCallDay: 0, hitRateSum: 0, hitRateCount: 0, mtdOmsFm: 0, tgtOmsFm: 0, achEpbPoinRoa: 0, tgtEpbStrata2: 0 },
+        sums: { achScVsJks: 0, tgtScJks: 0, geofencing: 0, roa: 0, cb: 0, avgEc: 0, totalCallDay: 0, totalCallEsuite: 0, effectiveTotalCallDay: 0, hitRateSum: 0, hitRateCount: 0, pairedHitRateEcSum: 0, pairedHitRateScSum: 0, pairedHitRateCount: 0, mtdOmsFm: 0, tgtOmsFm: 0, achEpbPoinRoa: 0, tgtEpbStrata2: 0 },
         tatMtd: isValidTatMtdValue(rec && rec.tatMtd) ? Number(rec.tatMtd) : null,
         eligibleMembers: []
       });
@@ -3213,6 +3266,14 @@ function aggregateByGroup(eligibleRecords, allRecords, keyFn, metaFn, settings) 
     s.geofencing += num(rec.geofencing); s.roa += num(rec.roa); s.cb += num(rec.cb);
     s.avgEc += num(rec.avgEc); s.totalCallDay += num(rec.totalCallDay); s.totalCallEsuite += num(rec.totalCallEsuite);
     s.effectiveTotalCallDay += num(hitRateDenominatorForRecord(rec, formulaModel));
+    // Populasi BERPASANGAN valid: hanya salesman yang punya AVG EC valid DAN AVG SC (W) valid (> 0).
+    // Dipakai bersama oleh engine Hit Rate ratio-of-sums dan oleh display Avg EC / Avg SC,
+    // supaya angka UI selalu reconcile dengan Hit Rate.
+    const pairedSc = pairedHitRateDenominator(rec);
+    const pairedEc = pairedHitRateNumerator(rec);
+    if (pairedSc !== null && pairedEc !== null) {
+      s.pairedHitRateScSum += pairedSc; s.pairedHitRateEcSum += pairedEc; s.pairedHitRateCount++;
+    }
     const salesmanHitRate = calculateKpiForSalesman(APP_CONFIG.KPI_DEFS.find(def => def.id === 'hitRate'), rec, settings);
     if (Number.isFinite(Number(salesmanHitRate))) { s.hitRateSum += Number(salesmanHitRate); s.hitRateCount++; }
     s.mtdOmsFm += num(rec.mtdOmsFm); s.tgtOmsFm += num(rec.tgtOmsFm);
@@ -3228,14 +3289,19 @@ function pctv(v) { return v === null ? null : v * 100; }
 function computeGroupKpisAndScore(g, settings) {
   const s = g.sums, cap = settings.scoreCap, weights = settings.weights, eligibleCount = g.eligibleSalesman;
   const formulaModel = formulaModelForSettings(settings);
-  const hitRateActual = formulaModel.hitRateAggregationMode === 'mean_salesman_percent'
-    ? (s.hitRateCount > 0 ? s.hitRateSum / s.hitRateCount : null)
-    : pctv(safeDivide(s.avgEc, s.effectiveTotalCallDay));
+  // paired_ratio_of_sums (current v2) = SUM(AVG EC) ÷ SUM(AVG SC) pada salesman berpasangan valid,
+  // dihitung langsung dari raw salesman population (bukan rata-rata persen anak grup).
+  // mean_salesman_percent (official v1) dan ratio_of_sums (legacy) TIDAK berubah.
+  const hitRateActual = formulaModel.hitRateAggregationMode === 'paired_ratio_of_sums'
+    ? pctv(safeDivide(s.pairedHitRateEcSum, s.pairedHitRateScSum))
+    : (formulaModel.hitRateAggregationMode === 'mean_salesman_percent'
+      ? (s.hitRateCount > 0 ? s.hitRateSum / s.hitRateCount : null)
+      : pctv(safeDivide(s.avgEc, s.effectiveTotalCallDay)));
   const actuals = {
     scJks: pctv(safeDivide(s.achScVsJks, s.tgtScJks)),
     geofencing: pctv(safeDivide(s.geofencing, s.achScVsJks)),
     roaCb: pctv(safeDivide(s.roa, s.cb)),
-    // Current = mean persen salesman valid; historical = ratio-of-sums sesuai model snapshot.
+    // Current v2 = ratio-of-sums populasi berpasangan; v1 official = mean persen salesman; legacy = ratio-of-sums lama.
     hitRate: hitRateActual,
     avgEcAch: pctv(safeDivide(s.avgEc, settings.avgEcTarget * eligibleCount)),
     revenue: pctv(safeDivide(s.mtdOmsFm, s.tgtOmsFm)),
@@ -3317,7 +3383,9 @@ function buildHierarchy(validation, settings) {
   });
 
   if (PERF_DEBUG) perfLog('buildHierarchy', __t0, `${eligible.length} eligible salesman`);
-  return { salesmanScored, byAss, byDepo, byRegion, byCabang, hasMasterCabang, national };
+  // __settings disimpan agar drill-down ASS -> Depo dapat meng-agregasi ulang subset Depo
+  // milik satu ASS memakai engine + formula model yang PERSIS sama (tanpa formula baru).
+  return { salesmanScored, byAss, byDepo, byRegion, byCabang, hasMasterCabang, national, __settings: settings };
 }
 
 /* ============================================================
@@ -3723,7 +3791,7 @@ async function downloadStyledExcelReport({ filenameBase, title, metadata = [], c
       const group = excelColumnGroup(safeColumns[start - 1]); let end = start;
       while (end < safeColumns.length && excelColumnGroup(safeColumns[end]) === group) end++;
       if (end > start) sheet.mergeCells(headerStart, start, headerStart, end);
-      const cell = sheet.getCell(headerStart, start); cell.value = ({identity:'IDENTITAS',result:'HASIL',process:'PROSES KERJA',productivity:'PRODUCTIVITY',revenue:'REVENUE TOTAL'})[group];
+      const cell = sheet.getCell(headerStart, start); cell.value = ({identity:'IDENTITAS',result:'HASIL',process:'PROSES KERJA',productivity:'PRODUCTIVITY',revenue:'PENJUALAN'})[group];
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${EXCEL_GROUP_COLORS[group]}` } };
       cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; cell.alignment = { horizontal: 'center', vertical: 'middle' };
       start = end + 1;
@@ -3906,7 +3974,7 @@ function getRankingJpgRowClasses(row, totalEntities, visualMode = 'standard') {
 const RANKING_HEADER_GROUPS = {
   process: { label: 'Proses Kerja', webClass: 'dt-grp-process', jpgClass: 'jpg-grp-process' },
   productivity: { label: 'Productivity', webClass: 'dt-grp-productivity', jpgClass: 'jpg-grp-productivity' },
-  revenue: { label: 'Revenue Total', webClass: 'dt-grp-revenue', jpgClass: 'jpg-grp-revenue' }
+  revenue: { label: 'Penjualan', webClass: 'dt-grp-revenue', jpgClass: 'jpg-grp-revenue' }
 };
 function buildRankingHeaderStructure(columns) {
   const top = [];
@@ -5228,7 +5296,7 @@ function jpgKpiSummaryHtml() {
   const groups = [
     ['PROSES KERJA', ['scJks', 'geofencing']],
     ['PRODUCTIVITY', ['roaCb', 'hitRate', 'avgEcAch']],
-    ['REVENUE TOTAL', ['revenue', 'strata2']]
+    ['PENJUALAN', ['revenue', 'strata2']]
   ];
   const lines = groups.map(([label, ids]) => {
     const active = ids.filter(id => isKpiActive(id, settings));
@@ -5362,13 +5430,66 @@ function renderKpiInfoPanel(settings) {
         </div>`).join('')}
     </div>`;
   });
+  // Satu utility strip compact untuk halaman Ranking: VACANT + metadata periode ringkas +
+  // toggle Metode & Bobot KPI. Accordion body tetap full width di bawah strip (id tidak berubah).
   return `<div class="kpi-panel">
-      <button class="kpi-panel-toggle" id="kpi-panel-toggle-btn"><span>📋 Metode Penilaian dan Bobot KPI</span><span class="kpi-panel-caret">▾</span></button>
+      <div class="ranking-utility-row">
+        ${rankingUtilityVacantChipHtml()}
+        ${rankingUtilityPeriodChipHtml()}
+        ${rankingUtilityNoticeChipHtml()}
+        <button class="kpi-panel-toggle" id="kpi-panel-toggle-btn"><span>📋 Metode &amp; Bobot KPI</span><span class="kpi-panel-caret">▾</span></button>
+      </div>
       <div class="kpi-panel-body" id="kpi-panel-body" style="display:none;">
         <div class="kpi-info-groups">${groupsHtml}</div>
         <div class="kpi-info-cap">Skor tiap KPI dibatasi maksimum <strong>${settings.scoreCap}</strong> poin (nilai aktual tetap ditampilkan apa adanya). EPB 6 dan Golden Process tidak tersedia sebagai KPI aktif.</div>
       </div>
     </div>`;
+}
+/* ------------------------------------------------------------
+   COMPACT UTILITY ROW — HALAMAN RANKING
+   Menggantikan tiga blok terpisah (warning VACANT di topbar, banner periode/publikasi,
+   card Metode & Bobot KPI) menjadi satu baris ringkas. Tidak mengubah data/logic apa pun.
+   ------------------------------------------------------------ */
+const COMPACT_MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+function compactMonthYearLabel(periodKey) {
+  const text = String(periodKey || '').trim();
+  if (!/^\d{4}-\d{2}$/.test(text)) return '';
+  const [year, month] = text.split('-');
+  const index = Number(month) - 1;
+  return index >= 0 && index < 12 ? `${COMPACT_MONTH_LABELS[index]} ${year}` : '';
+}
+function compactDayMonthLabel(value) {
+  if (value === null || value === undefined || value === '') return '';
+  const date = value instanceof Date ? value : new Date(value);
+  if (!(date instanceof Date) || isNaN(date.getTime())) return '';
+  return `${date.getDate()} ${COMPACT_MONTH_LABELS[date.getMonth()]}`;
+}
+function rankingUtilityVacantChipHtml() {
+  if (!State.activeSnapshot) return '';
+  return getActiveStatusSalesmanFilter().has('VACANT')
+    ? '<span class="ru-chip ru-chip-warn">⚠ VACANT dihitung</span>' : '';
+}
+// Contoh: "Sep 2026 · MTD · 10 Sep · Rev 2". Sumber teknis (Supabase/Cache) hanya untuk Admin.
+function rankingUtilityPeriodChipHtml() {
+  const snapshot = State.activeSnapshot;
+  if (!snapshot) return '';
+  const publication = State.remotePublication || null;
+  const parts = [];
+  const monthLabel = compactMonthYearLabel((publication && publication.periodKey) || snapshotPeriodKey(snapshot));
+  if (monthLabel) parts.push(monthLabel);
+  const statusLabel = periodStatusLabel((publication && publication.periodStatus) || snapshotPeriodStatus(snapshot));
+  if (statusLabel) parts.push(statusLabel);
+  const cutoffLabel = compactDayMonthLabel((publication && publication.cutoffDate) || snapshot.cutoffDate);
+  if (cutoffLabel) parts.push(cutoffLabel);
+  if (publication && Number(publication.revisionNumber) > 0) parts.push(`Rev ${fmtNumber(publication.revisionNumber)}`);
+  if (State.isAdmin && publication && publication.source === 'cache') parts.push('Cache');
+  if (!parts.length) return '';
+  return `<span class="ru-chip ru-chip-period">${escapeHtml(parts.join(' · '))}</span>`;
+}
+function rankingUtilityNoticeChipHtml() {
+  const message = String(State.remoteStatusMessage || '').trim();
+  if (!message || State.runtimeMode !== 'viewer') return '';
+  return `<span class="ru-chip ru-chip-note" title="${escapeHtml(message)}">${escapeHtml(message)}</span>`;
 }
 function wireKpiInfoPanel() {
   const btn = document.getElementById('kpi-panel-toggle-btn'), body = document.getElementById('kpi-panel-body');
@@ -5520,7 +5641,7 @@ function validateCanonicalSnapshot(snapshot, label) {
     const tatValidation = validateTatDataset(snapshot.rawRecords);
     if (!tatValidation.valid || Math.abs(tatValidation.tatMtd - Number(snapshot.tatMtd)) > 0.01) throw new Error(`${label}.rawRecords memiliki TAT MTD yang tidak konsisten.`);
   }
-  if (snapshot.hitRateFormulaVersion === APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION) {
+  if (hitRateRegistryEntry(snapshot.hitRateFormulaVersion)) {
     const malformed = snapshot.rawRecords.find(record => !record || !Object.prototype.hasOwnProperty.call(record, 'totalCallEsuite'));
     if (malformed) throw new Error(`${label}.rawRecords belum memiliki TOTAL CALL ESUITE.`);
   }
@@ -6690,8 +6811,7 @@ async function openPublishNationalDialog() {
   });
 }
 function renderPublicationHistoryPage() {
-  return `<div class="page-header"><h1>Riwayat Publikasi Nasional</h1><p class="page-sub">Riwayat ini terpisah dari riwayat upload lokal Admin.</p></div>
-    <div class="panel"><div id="publication-history-content"><div class="loading-state">Memuat riwayat publikasi...</div></div></div>`;
+  return `<div class="panel"><div id="publication-history-content"><div class="loading-state">Memuat riwayat publikasi...</div></div></div>`;
 }
 /* ------------------------------------------------------------
    BATALKAN PUBLISH — DETEKSI CAPABILITY BACKEND
@@ -6943,6 +7063,13 @@ function cardLink(path, params) {
   const qs = merged.toString(); return `#${path}${qs ? '?' + qs : ''}`;
 }
 const COHORT_RANKING_PATHS = new Set(['/ranking-regional', '/ranking-cabang', '/ranking-depo', '/ranking-ass', '/ranking-salesman']);
+// Halaman yang memakai shared ranking page renderer: judul besar + breadcrumb TIDAK ditampilkan.
+// Berlaku generic untuk seluruh scope ranking (termasuk Nasional/Senior/Developing/New/Custom Group
+// yang merupakan cohort dari path ranking yang sama), dan untuk Ranking Phase (Admin).
+const RANKING_PAGE_PATHS = new Set([...COHORT_RANKING_PATHS, '/ranking-phase']);
+function isRankingPagePath(path) { return RANKING_PAGE_PATHS.has(path); }
+// Dashboard Utama = satu-satunya halaman yang menampilkan chip ringkasan "Data: ...".
+function isDashboardPath(path) { return path === '/dashboard'; }
 function isCohortContextPath(path) { return COHORT_RANKING_PATHS.has(path) || path === '/detail-kpi' || path === '/simulasi-ranking'; }
 
 function buildBreadcrumb(path, params) {
@@ -7045,11 +7172,15 @@ function router() {
       root.innerHTML = renderCorruptLegacyOfficialState(); return;
     }
   }
+  // Halaman Ranking: metadata periode/publikasi sudah ringkas di compact utility row,
+  // jadi banner tinggi publicDataBanner tidak lagi dirender di sana. Banner peringatan
+  // formula legacy TETAP ditampilkan di semua halaman.
+  const periodBanner = isRankingPagePath(path) ? '' : publicDataBannerHtml();
   if (activeCohort() && State.validation && State.validation.totalRead === 0) {
-    root.innerHTML = `${publicDataBannerHtml()}${legacyOfficialCompatibilityBannerHtml()}${tatLegacyBannerHtml()}${cohortEmptyStateHtml()}`;
+    root.innerHTML = `${periodBanner}${legacyOfficialCompatibilityBannerHtml()}${tatLegacyBannerHtml()}${cohortEmptyStateHtml()}`;
     return;
   }
-  root.innerHTML = `${publicDataBannerHtml()}${legacyOfficialCompatibilityBannerHtml()}${tatLegacyBannerHtml()}${renderFn(params)}`;
+  root.innerHTML = `${periodBanner}${legacyOfficialCompatibilityBannerHtml()}${tatLegacyBannerHtml()}${renderFn(params)}`;
   applyCohortPageContext(path);
   const wireFn = WIRE_FNS[path]; if (wireFn) wireFn(params);
 }
@@ -7234,7 +7365,7 @@ function openActiveDataPopover(button) {
       <div class="topbar-data-popover-label">Regional aktif</div><div class="topbar-data-popover-value">${escapeHtml(State.activeRegionFilters.size ? globalRegionFilterValues().join(', ') : 'Semua Regional')}</div>
       <div class="topbar-data-popover-label">Data valid</div><div class="topbar-data-popover-value">${fmtNumber(State.validation.totalEligible || 0)}</div>
       <div class="topbar-data-popover-label">Bermasalah</div><div class="topbar-data-popover-value">${fmtNumber(State.validation.totalNotEligible || 0)}</div>
-      <div class="topbar-data-popover-label">EC vs Call Total</div><div class="topbar-data-popover-value">TOTAL CALL ESUITE</div>
+      <div class="topbar-data-popover-label">Hit Rate EC</div><div class="topbar-data-popover-value">TOTAL CALL ESUITE</div>
       <div class="topbar-data-popover-label">TAT MTD</div><div class="topbar-data-popover-value">${isValidTatMtdValue(snapshot.tatMtd) ? fmtPercent(snapshot.tatMtd) : '-'}</div>
       <div class="topbar-data-popover-label">Pembanding</div><div class="topbar-data-popover-value">${escapeHtml(comparisonSnapshotLabel())}</div>
     </div>
@@ -7598,7 +7729,6 @@ function renderTopbar(path, params) {
   closeStatusSalesmanPopover();
   closeGlobalMultiPopover();
   const el = document.getElementById('topbar');
-  const crumbs = buildBreadcrumb(path, params);
   const phaseOptions = getPhaseOptions();
   const regionOptions = getRegionOptions();
   // Global Filter berlaku untuk SEMUA halaman termasuk Ranking Phase (Phase kini multi-select).
@@ -7606,14 +7736,15 @@ function renderTopbar(path, params) {
   const showRegionFilter = !!State.activeSnapshot && regionOptions.length > 0;
   const showStatusFilter = !!State.activeSnapshot;
   const vacantIncluded = showStatusFilter && getActiveStatusSalesmanFilter().has('VACANT');
-  const dataSummary = activeDataSummaryText();
+  // Chip "Data: ..." hanya relevan sebagai ringkasan dataset di Dashboard Utama.
+  // Halaman lain (Ranking/Detail KPI/Simulasi/Admin) tidak lagi menampilkannya —
+  // data source, snapshot metadata, TAT dan validation TIDAK diubah, hanya visibility UI.
+  const dataSummary = isDashboardPath(path) ? activeDataSummaryText() : '';
+  // SELURUH halaman kini tampil TANPA judul besar dan TANPA breadcrumb utama supaya
+  // konten naik ke atas. Breadcrumb di dalam modal drill-down TIDAK terpengaruh.
   el.innerHTML = `
-    <div class="topbar-titles">
-      <div class="topbar-title">${escapeHtml(PAGE_TITLES[path] || 'Dashboard')}</div>
-      <div class="breadcrumb">${crumbs.map((c, i) => c.link && i < crumbs.length - 1 ? `<a href="#${c.link}">${escapeHtml(c.label)}</a>` : `<span>${escapeHtml(c.label)}</span>`).join(' &rsaquo; ')}</div>
-    </div>
     <div class="topbar-controls">
-    <div class="topbar-controls-row topbar-controls-row-primary">
+    <div class="topbar-controls-row topbar-controls-row-single">
     ${periodSelectorHtml()}
     ${dataSummary ? `<button type="button" class="topbar-data-summary" id="topbar-data-summary" aria-expanded="false"><span class="dot"></span>${escapeHtml(dataSummary)}</button>` : ''}
     ${showPhaseFilter ? `
@@ -7624,11 +7755,9 @@ function renderTopbar(path, params) {
       <div class="topbar-phase-filter">
         <button type="button" class="btn btn-outline btn-sm topbar-global-filter-btn" id="topbar-region-btn" aria-expanded="false" aria-haspopup="dialog" title="Filter global Regional (boleh lebih dari satu)">Regional: ${escapeHtml(globalRegionFilterLabel())} ▾</button>
       </div>` : ''}
-    </div>
-    <div class="topbar-controls-row topbar-controls-row-secondary">
     ${showStatusFilter ? `
       <div class="topbar-phase-filter">
-        <button type="button" class="btn btn-outline btn-sm topbar-status-btn" id="topbar-status-btn">Status Salesman: ${escapeHtml(statusSalesmanFilterLabel())} ▾</button>
+        <button type="button" class="btn btn-outline btn-sm topbar-status-btn" id="topbar-status-btn" title="Filter global Status Salesman: ${escapeHtml(statusSalesmanFilterLabel())}">Status Salesman: ${escapeHtml(statusSalesmanFilterLabel())} ▾</button>
       </div>` : ''}
     <div class="topbar-auth-actions">
       <span class="runtime-badge ${State.isLocalDemo ? 'demo' : (State.isAdmin ? 'admin' : (State.remoteSource === 'cache' ? 'cache' : 'viewer'))}"><span class="dot"></span>${State.isLocalDemo ? '🧪 MODE DEMO LOKAL · ADMIN DEMO' : (State.isAdmin ? 'Mode Admin' : (State.remoteSource === 'cache' ? 'Viewer · Cache' : 'Mode Viewer'))}</span>
@@ -7644,7 +7773,7 @@ function renderTopbar(path, params) {
     </div>
     </div>
     ${State.isLocalDemo ? '<div class="demo-runtime-notice">Data simulasi • Tidak terhubung Supabase • Tidak dapat Publish</div>' : ''}
-    ${vacantIncluded ? `<div class="topbar-vacant-warning">⚠ Posisi VACANT sedang disertakan dalam perhitungan.</div>` : ''}`;
+    ${vacantIncluded && !isRankingPagePath(path) ? `<div class="topbar-vacant-warning">⚠ VACANT dihitung</div>` : ''}`;
   const btn = document.getElementById('topbar-upload-btn'); if (btn) btn.addEventListener('click', () => navigate('/upload'));
   const loginBtn = document.getElementById('topbar-login-btn'); if (loginBtn) loginBtn.addEventListener('click', openAdminLoginModal);
   const logoutBtn = document.getElementById('topbar-logout-btn'); if (logoutBtn) logoutBtn.addEventListener('click', logoutAdmin);
@@ -7822,10 +7951,6 @@ function renderDashboardPage() {
 
   return `
     <div class="page-header dashboard-page-header">
-      <div>
-        <h1>Dashboard Utama</h1>
-        <p class="page-sub">Ringkasan performa nasional.</p>
-      </div>
       <div class="dashboard-page-header-actions">
         ${(() => {
           const currentScore = h.national ? h.national.finalScore : null;
@@ -7923,10 +8048,30 @@ function rankingAverageEc(row) {
     return Number.isFinite(value) ? value : null;
   }
   if (row && row.sums) {
+    // Pada model current (paired_ratio_of_sums) AVG EC level Depo ke atas memakai populasi
+    // berpasangan valid yang sama dengan Hit Rate, sehingga AVG EC ÷ AVG SC reconcile
+    // dengan SUM EC ÷ SUM SC. Snapshot official model lain tetap memakai pembagi lamanya.
+    if (formulaModelForSettings(null).hitRateAggregationMode === 'paired_ratio_of_sums'
+      && Number(row.sums.pairedHitRateCount) > 0) {
+      return Number(row.sums.pairedHitRateEcSum) / Number(row.sums.pairedHitRateCount);
+    }
     const divisor = Number(row.eligibleSalesman ?? row.totalSalesman);
     return safeDivide(Number(row.sums.avgEc), divisor);
   }
   return null;
+}
+// AVG SC baris ranking: salesman = TOTAL CALL ESUITE (W) langsung, agregat = rata-rata paired valid.
+function rankingAvgScEsuite(row) {
+  if (!row) return null;
+  if (row.rec) return avgScEsuiteForRecord(row.rec);
+  if (row.sums) return avgScEsuiteForGroupSums(row.sums);
+  return null;
+}
+// Display supporting metric: maksimal 1 desimal, trailing .0 dibuang, locale id-ID dipertahankan.
+function fmtSupportAverage(v) {
+  if (v === null || v === undefined || isNaN(v) || !isFinite(v)) return '-';
+  const rounded = Math.round(Number(v) * 10) / 10;
+  return fmtNumber(rounded, Number.isInteger(rounded) ? 0 : 1);
 }
 function rankingKpiActual(row, kpiId) {
   const value = row && row.kpi && row.kpi[kpiId] ? Number(row.kpi[kpiId].actual) : NaN;
@@ -8046,10 +8191,10 @@ function rankingTatColumn(key, kpiId, groupKey, groupLabel, groupClass, width = 
    ------------------------------------------------------------ */
 const RANKING_KPI_COLUMN_WIDTH = 104;
 /**
- * Presentasi header dua baris KHUSUS. Label data (c.label) TETAP "EC VS CALL TOTAL" satu baris,
- * sehingga CSV, JPG, Countif, filter, dan aria-label tidak ikut berubah — hanya markup header web.
+ * Presentasi header dua baris KHUSUS (markup header web saja; c.label untuk CSV/JPG/Countif/filter
+ * tidak pernah ikut berubah). Label "HIT RATE EC" sudah cukup pendek sehingga tidak perlu dipecah.
  */
-const RANKING_MULTILINE_HEADER_LABELS = { 'EC VS CALL TOTAL': ['EC VS', 'CALL TOTAL'] };
+const RANKING_MULTILINE_HEADER_LABELS = {};
 function rankingHeaderLabelHtml(label) {
   const lines = RANKING_MULTILINE_HEADER_LABELS[String(label || '').trim()];
   if (!lines) return escapeHtml(label);
@@ -8092,7 +8237,7 @@ function kpiHeaderFilterDefs() {
     // AVG EC di popover filter memakai nilai aktual mentah yang sama dengan grafik "AVG EC Aktual" di Detail KPI (kpiId 'avgEcAch').
     { key: 'support.avgEc', type: 'kpi-combined', kpiId: 'avgEcAch', label: 'AVG EC', placeholderMin: 'Minimum', placeholderMax: 'Maksimum', valueFn: rankingAverageEc },
     { key: 'kpi.roaCb.actual', type: 'kpi-combined', kpiId: 'roaCb', label: 'ROA', placeholderMin: 'Minimum %', placeholderMax: 'Maksimum %' },
-    { key: 'kpi.hitRate.actual', type: 'kpi-combined', kpiId: 'hitRate', label: 'EC vs Call Total', placeholderMin: 'Minimum %', placeholderMax: 'Maksimum %' },
+    { key: 'kpi.hitRate.actual', type: 'kpi-combined', kpiId: 'hitRate', label: 'Hit Rate EC', placeholderMin: 'Minimum %', placeholderMax: 'Maksimum %' },
     // Target Omzet, Omzet, Target EPB2, EPB2 TIDAK memiliki grafik/pengaturan Strata tersendiri di Detail KPI
     // (Detail KPI hanya punya 7 grafik: SC/JKS, Geofencing, ROA, EC vs Call Total, Golden EC, Total Omset,
     // EPB Strata 2) — supaya tidak membuat definisi strata terpisah, keempat kolom nominal ini tetap
@@ -8115,7 +8260,7 @@ function kpiHeaderFilterDefs() {
 }
 const KPI_HEADER_FILTER_LABELS = {
   'kpi.scJks.actual': 'SC/JKS', 'kpi.geofencing.actual': 'Geofencing', 'support.avgEc': 'AVG EC',
-  'kpi.roaCb.actual': 'ROA', 'kpi.hitRate.actual': 'EC vs Call Total',
+  'kpi.roaCb.actual': 'ROA', 'kpi.hitRate.actual': 'Hit Rate EC',
   'revenueNominal.target': 'Target Omzet', 'revenueNominal.actual': 'Omzet',
   'kpi.revenue.actual': 'Total Omset', 'support.tgtEpb2': 'Target EPB Strata 2',
   'support.epb2': 'EPB Strata 2', 'kpi.strata2.actual': 'EPB Strata 2'
@@ -8240,40 +8385,46 @@ function rankingColumns(opts) {
     rankingPercentColumn('kpi.scJks.actual', 'SC/JKS', 'process', 'Proses Kerja', 'dt-grp-process', 'scJks', { sortId: 'scJks' }),
     rankingPercentColumn('kpi.geofencing.actual', 'GEO', 'process', 'Proses Kerja', 'dt-grp-process', 'geofencing', { sortId: 'geofencing' }),
     {
-      key: 'support.avgEc', label: 'AVG EC', kpiId: 'avgEcAch', groupKey: 'productivity', groupLabel: 'Productivity', groupClass: 'dt-grp-productivity', align: 'center', sortable: true, sortId: 'avgEc', width: RANKING_KPI_COLUMN_WIDTH,
-      render: row => { const value = rankingAverageEc(row); return value === null ? '-' : fmtNumber(value, 0); },
-      csvValue: row => rankingAverageEc(row),
-      jpgValue: row => { const value = rankingAverageEc(row); return value === null ? '-' : fmtNumber(value, 0); }
+      key: 'support.avgScEsuite', label: 'AVG SC', kpiId: 'hitRate', excelNumberFormat: '#,##0.#', groupKey: 'productivity', groupLabel: 'Productivity', groupClass: 'dt-grp-productivity', align: 'center', sortable: false, width: RANKING_KPI_COLUMN_WIDTH,
+      render: row => fmtSupportAverage(rankingAvgScEsuite(row)),
+      csvValue: row => rankingAvgScEsuite(row),
+      jpgValue: row => fmtSupportAverage(rankingAvgScEsuite(row))
     },
+    {
+      key: 'support.avgEc', label: 'AVG EC', kpiId: 'avgEcAch', excelNumberFormat: '#,##0.#', groupKey: 'productivity', groupLabel: 'Productivity', groupClass: 'dt-grp-productivity', align: 'center', sortable: true, sortId: 'avgEc', width: RANKING_KPI_COLUMN_WIDTH,
+      render: row => fmtSupportAverage(rankingAverageEc(row)),
+      csvValue: row => rankingAverageEc(row),
+      jpgValue: row => fmtSupportAverage(rankingAverageEc(row))
+    },
+    rankingPercentColumn('kpi.hitRate.actual', 'HIT RATE EC', 'productivity', 'Productivity', 'dt-grp-productivity', 'hitRate', { sortId: 'hitRate' }),
     rankingPercentColumn('kpi.avgEcAch.actual', 'Golden EC', 'productivity', 'Productivity', 'dt-grp-productivity', 'avgEcAch', { csvOnly: true, excludeFromJpg: true, width: RANKING_KPI_COLUMN_WIDTH }),
     { key: 'support.tgtRoa', label: 'TGT ROA', kpiId: 'roaCb', groupKey: 'productivity', groupLabel: 'Productivity', groupClass: 'dt-grp-productivity', align: 'center', sortable: false, width: RANKING_KPI_COLUMN_WIDTH,
       render: row => fmtNumber(rankingRoaTarget(row), 0), csvValue: row => rankingRoaTarget(row), jpgValue: row => fmtNumber(rankingRoaTarget(row), 0) },
     { key: 'support.roa', label: 'ROA', kpiId: 'roaCb', groupKey: 'productivity', groupLabel: 'Productivity', groupClass: 'dt-grp-productivity', align: 'center', sortable: false, width: RANKING_KPI_COLUMN_WIDTH,
       render: row => fmtNumber(rankingRoaActual(row), 0), csvValue: row => rankingRoaActual(row), jpgValue: row => fmtNumber(rankingRoaActual(row), 0) },
     rankingPercentColumn('kpi.roaCb.actual', '%ROA', 'productivity', 'Productivity', 'dt-grp-productivity', 'roaCb', { sortId: 'roaCb' }),
-    rankingPercentColumn('kpi.hitRate.actual', 'EC VS CALL TOTAL', 'productivity', 'Productivity', 'dt-grp-productivity', 'hitRate', { sortId: 'hitRate' }),
     {
-      key: 'revenueNominal.target', label: 'TGT OMZ', kpiId: 'revenue', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'tgtOmz', width: RANKING_KPI_COLUMN_WIDTH,
+      key: 'revenueNominal.target', label: 'TGT OMZ', kpiId: 'revenue', groupKey: 'revenue', groupLabel: 'Penjualan', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'tgtOmz', width: RANKING_KPI_COLUMN_WIDTH,
       render: row => rankingCompactMoneyHtml(rankingRevenueNominalTarget(row)),
       csvValue: row => rankingRevenueNominalTarget(row),
       jpgValue: row => fmtRupiahCompact(rankingRevenueNominalTarget(row))
     },
     {
-      key: 'revenueNominal.actual', label: 'OMZET', kpiId: 'revenue', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'omzet', width: RANKING_KPI_COLUMN_WIDTH,
+      key: 'revenueNominal.actual', label: 'OMZET', kpiId: 'revenue', groupKey: 'revenue', groupLabel: 'Penjualan', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'omzet', width: RANKING_KPI_COLUMN_WIDTH,
       render: row => rankingCompactMoneyHtml(rankingRevenueNominalActual(row)),
       csvValue: row => rankingRevenueNominalActual(row),
       jpgValue: row => fmtRupiahCompact(rankingRevenueNominalActual(row))
     },
-    rankingPercentColumn('kpi.revenue.actual', '% OMZ', 'revenue', 'Revenue Total', 'dt-grp-revenue', 'revenue', { sortId: 'pctOmz' }),
+    rankingPercentColumn('kpi.revenue.actual', '% OMZ', 'revenue', 'Penjualan', 'dt-grp-revenue', 'revenue', { sortId: 'pctOmz' }),
     {
-      key: 'support.tgtEpb2', label: 'TGT EPB2', kpiId: 'strata2', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'tgtEpb2', width: RANKING_KPI_COLUMN_WIDTH,
+      key: 'support.tgtEpb2', label: 'TGT EPB2', kpiId: 'strata2', groupKey: 'revenue', groupLabel: 'Penjualan', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'tgtEpb2', width: RANKING_KPI_COLUMN_WIDTH,
       render: row => fmtNumber(rankingEpbTarget(row), 0), csvValue: row => rankingEpbTarget(row), jpgValue: row => fmtNumber(rankingEpbTarget(row), 0)
     },
     {
-      key: 'support.epb2', label: 'EPB2', kpiId: 'strata2', groupKey: 'revenue', groupLabel: 'Revenue Total', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'epb2', width: RANKING_KPI_COLUMN_WIDTH,
+      key: 'support.epb2', label: 'EPB2', kpiId: 'strata2', groupKey: 'revenue', groupLabel: 'Penjualan', groupClass: 'dt-grp-revenue', align: 'center', sortable: true, sortId: 'epb2', width: RANKING_KPI_COLUMN_WIDTH,
       render: row => fmtNumber(rankingEpbActual(row), 0), csvValue: row => rankingEpbActual(row), jpgValue: row => fmtNumber(rankingEpbActual(row), 0)
     },
-    rankingPercentColumn('kpi.strata2.actual', '% EPB2', 'revenue', 'Revenue Total', 'dt-grp-revenue', 'strata2', { sortId: 'pctEpb2' }),
+    rankingPercentColumn('kpi.strata2.actual', '% EPB2', 'revenue', 'Penjualan', 'dt-grp-revenue', 'strata2', { sortId: 'pctEpb2' }),
     { key: 'finalScore', label: 'Final Score', align: 'center', sortable: true, sortId: 'finalScore', headerBand: 'result', width: 104,
       render: r => `<strong>${fmtNumber(r.finalScore, 2)}</strong>`, csvValue: r => r.finalScore, jpgValue: r => fmtNumber(r.finalScore, 2) },
     { key: 'category.label', label: 'Kategori', align: 'center', sortable: false, headerBand: 'result', width: 128,
@@ -8295,7 +8446,7 @@ const TREND_KPI_OPTIONS = Object.freeze({
   // dan bukan weighted contribution: AVG EC / target AVG EC config periode × 100%.
   avgEc: { label: 'Golden EC', kpiId: 'avgEcAch', percent: true, decimals: 2, value: row => rankingKpiActual(row, 'avgEcAch') },
   roaCb: { label: '%ROA', kpiId: 'roaCb', percent: true, decimals: 2, value: row => rankingKpiActual(row, 'roaCb') },
-  hitRate: { label: 'EC VS CALL TOTAL', kpiId: 'hitRate', percent: true, decimals: 2, value: row => rankingKpiActual(row, 'hitRate') },
+  hitRate: { label: 'HIT RATE EC', kpiId: 'hitRate', percent: true, decimals: 2, value: row => rankingKpiActual(row, 'hitRate') },
   revenue: { label: '%OMZ', kpiId: 'revenue', percent: true, decimals: 2, value: row => rankingKpiActual(row, 'revenue') },
   strata2: { label: '%EPB2', kpiId: 'strata2', percent: true, decimals: 2, value: row => rankingKpiActual(row, 'strata2') }
 });
@@ -9015,7 +9166,7 @@ const SIMULATION_KPIS = Object.freeze([
   { id: 'scJks', label: 'SC/JKS', percent: true },
   { id: 'geofencing', label: 'GEO', percent: true },
   { id: 'roaCb', label: '%ROA', percent: true },
-  { id: 'hitRate', label: 'EC VS CALL TOTAL', percent: true },
+  { id: 'hitRate', label: 'HIT RATE EC', percent: true },
   { id: 'avgEcAch', label: 'AVG EC', percent: false },
   { id: 'revenue', label: '%OMZ', percent: true },
   { id: 'strata2', label: '%EPB2', percent: true }
@@ -9214,8 +9365,7 @@ function renderSimulationRankingPage() {
   const validation = simulationConfigValidation(simulation.draftConfig);
   const rows = buildSimulationRanking(simulation.level, simulation.appliedConfig);
   const appliedSelected = simulationAvailableKpis().filter(kpi => simulation.appliedConfig.selected[kpi.id]);
-  return `<div class="page-header"><h1>🧪 Simulasi Ranking</h1><p class="page-sub">Modifikasi KPI &amp; Bobot untuk simulasi — tidak mengubah Ranking resmi.</p></div>
-    <div class="simulation-banner"><strong>🧪 MODE SIMULASI — Tidak mengubah Ranking Resmi</strong><span>What-if analysis 100% client-side pada data aktif.</span></div>
+  return `<div class="simulation-banner"><strong>🧪 MODE SIMULASI — Tidak mengubah Ranking Resmi</strong><span>What-if analysis 100% client-side pada data aktif.</span></div>
     <div class="simulation-layout">
       <section class="panel simulation-config-panel">
         <div class="simulation-panel-head"><div><h2>Konfigurasi Simulasi</h2><p>Perubahan draft baru dihitung setelah diterapkan.</p></div></div>
@@ -9554,8 +9704,7 @@ function getPhaseRankingRows() {
   }).filter(Boolean);
 }
 function renderRankingPhasePage() {
-  return `<div class="page-header"><h1>Ranking Phase</h1><p class="page-sub">Perbandingan performa seluruh Phase pada snapshot aktif. Halaman ini selalu menampilkan Semua Phase.</p></div>
-    ${renderKpiInfoPanel(State.settings)}
+  return `${renderKpiInfoPanel(State.settings)}
     <div class="panel"><div id="dt-phase"></div></div>`;
 }
 function wireRankingPhasePage() {
@@ -9597,8 +9746,7 @@ function wireRankingPhasePage() {
 }
 
 function renderRankingRegionalPage() {
-  return `<div class="page-header"><h1>Ranking Regional</h1><p class="page-sub">Perbandingan performa seluruh Regional secara nasional.</p></div>
-    ${renderKpiInfoPanel(State.settings)}
+  return `${renderKpiInfoPanel(State.settings)}
     <div class="panel"><div id="dt-regional"></div></div>`;
 }
 function wireRankingRegionalPage() {
@@ -9632,16 +9780,14 @@ function wireRankingRegionalPage() {
 
 function renderRankingCabangPage() {
   if (!State.hierarchy || !State.hierarchy.hasMasterCabang) {
-    return `<div class="page-header"><h1>Ranking Cabang</h1><p class="page-sub">Perbandingan performa seluruh Cabang.</p></div>
-      <div class="panel empty-state">
+    return `<div class="panel empty-state">
         <div class="empty-state-icon">🗺️</div>
         <h2>Master Cabang belum tersedia.</h2>
         <p class="muted">Unggah Master Cabang agar Ranking Cabang dapat dihitung.</p>
         <a class="btn btn-primary" href="#/upload?tab=master-cabang">Unggah Master Cabang</a>
       </div>`;
   }
-  return `<div class="page-header"><h1>Ranking Cabang</h1><p class="page-sub">Perbandingan performa seluruh Cabang secara nasional (agregasi seluruh Salesman pada Depo di Cabang tersebut).</p></div>
-    ${renderKpiInfoPanel(State.settings)}
+  return `${renderKpiInfoPanel(State.settings)}
     <div class="panel"><div id="dt-cabang"></div></div>`;
 }
 function wireRankingCabangPage() {
@@ -9680,8 +9826,7 @@ function renderRankingDepoPage(params) {
   const activeTab = params.get('region') ? 'regional' : (params.get('tab') || 'nasional');
   const regionOptions = State.hierarchy.byRegion.map(r => r.meta.region).sort();
   const selectedRegion = params.get('region') || regionOptions[0] || '';
-  return `<div class="page-header"><h1>Ranking Depo</h1><p class="page-sub">Bandingkan performa seluruh Depo.</p></div>
-    ${renderKpiInfoPanel(State.settings)}
+  return `${renderKpiInfoPanel(State.settings)}
     <div class="tabs">
       <button class="tab-btn ${activeTab === 'nasional' ? 'active' : ''}" data-tab="nasional">Depo Nasional</button>
       <button class="tab-btn ${activeTab === 'regional' ? 'active' : ''}" data-tab="regional">Depo per Regional</button>
@@ -9774,8 +9919,7 @@ function wireScopeSelector(pageBase) {
 
 function renderRankingAssPage(params) {
   const scope = params.get('scope') || 'nasional', value = params.get('value') || '';
-  return `<div class="page-header"><h1>Ranking ASS</h1><p class="page-sub">Perbandingan performa Area Sales Supervisor.</p></div>
-    ${renderKpiInfoPanel(State.settings)}
+  return `${renderKpiInfoPanel(State.settings)}
     <div class="panel"><div class="filter-row">${scopeSelector('ranking-ass', scope, value, ['nasional', 'regional', 'depo'])}</div><div id="dt-ass"></div></div>`;
 }
 function wireRankingAssPage(params) {
@@ -9823,8 +9967,7 @@ function wireRankingAssPage(params) {
 
 function renderRankingSalesmanPage(params) {
   const scope = params.get('scope') || 'nasional', value = params.get('value') || '';
-  return `<div class="page-header"><h1>Ranking Salesman</h1><p class="page-sub">Ranking individu salesman berdasarkan Final Score.</p></div>
-    ${renderKpiInfoPanel(State.settings)}
+  return `${renderKpiInfoPanel(State.settings)}
     <div class="panel">
       <div class="filter-row">${scopeSelector('ranking-salesman', scope, value, ['nasional', 'regional', 'depo', 'ass'])}</div>
       <div class="vacant-salesman-head"><div id="vacant-salesman-meta" class="vacant-salesman-meta"></div><button type="button" class="btn btn-outline btn-sm" id="vacant-manage-btn">Kelola VACANT</button></div>
@@ -9901,7 +10044,8 @@ function salesmanDetailProductivityFacts(rec, separator) {
   const parts = [];
   if (isKpiActive('roaCb') && isRankingAdminView()) parts.push(`CB/TGT ROA: ${fmtNumber(rec.cb)}`, `ROA: ${fmtNumber(rec.roa)}`);
   // TAT MTD sengaja TIDAK ditampilkan — tetap dipakai penuh oleh kpiScoreBasis().
-  if (isKpiActive('hitRate')) parts.push(`Total Call Esuite: ${fmtNumber(rec.totalCallEsuite, 2)}`);
+  // Avg SC salesman = TOTAL CALL ESUITE (kolom W) apa adanya, bukan Effective Total Call.
+  if (isKpiActive('hitRate')) parts.push(`Avg SC: ${fmtSupportAverage(avgScEsuiteForRecord(rec))}`);
   if (isKpiActive('avgEcAch')) parts.push(`AVG EC: ${fmtNumber(rec.avgEc, 2)} (target ${fmtNumber(currentKpiSettings().avgEcTarget)})`);
   return parts.join(separator);
 }
@@ -9949,7 +10093,7 @@ function openSalesmanDetailDrawer(row) {
       <tbody>${kpiRow(kpi.roaCb)}${kpiRow(kpi.hitRate)}${kpiRow(kpi.avgEcAch)}</tbody></table>
       ${salesmanDetailProductivityFacts(rec, ' • ') ? `<div class="detail-support-info">${salesmanDetailProductivityFacts(rec, ' • ')}</div>` : ''}
     </div>` : ''}
-    ${groups.revenue ? `<div class="detail-group"><h3>Revenue Total <span class="group-score">(${fmtNumber(groups.revenue.groupScore, 2)})</span></h3>
+    ${groups.revenue ? `<div class="detail-group"><h3>Penjualan <span class="group-score">(${fmtNumber(groups.revenue.groupScore, 2)})</span></h3>
       <table class="detail-table"><thead><tr><th>KPI</th><th class="ta-right">Aktual</th><th class="ta-right">Score</th><th class="ta-right">Bobot</th><th class="ta-right">Kontribusi</th></tr></thead>
       <tbody>${kpiRow(kpi.revenue)}${kpiRow(kpi.strata2)}</tbody></table>
       <div class="detail-support-info">${salesmanDetailRevenueBlock(rec, ' • ')}</div>
@@ -10198,12 +10342,15 @@ const REGIONAL_DEPO_PERF_GROUPS_ALL = [
   { key: 'identity', label: 'Identitas Depo', span: 3, cls: 'rdp-grp-identity', sticky: true, stickyLeft: 0, width: 430 },
   { key: 'process', label: 'Proses Kerja', span: 2, cls: 'rdp-grp-process' },
   { key: 'productivity', label: 'Productivity', span: 5, cls: 'rdp-grp-productivity' },
-  { key: 'revenue', label: 'Revenue Total', span: 6, cls: 'rdp-grp-revenue' },
+  { key: 'revenue', label: 'Penjualan', span: 6, cls: 'rdp-grp-revenue' },
   { key: 'result', label: 'Hasil Akhir', span: 2, cls: 'rdp-grp-result' }
 ];
 function rdpAvgEc(depoRow) {
-  const v = safeDivide(depoRow.sums.avgEc, depoRow.eligibleSalesman);
-  return v;
+  // Satu sumber dengan kolom ranking: populasi berpasangan valid pada model current.
+  return rankingAverageEc(depoRow);
+}
+function rdpAvgScEsuite(depoRow) {
+  return rankingAvgScEsuite(depoRow);
 }
 const REGIONAL_DEPO_PERF_COLUMNS_ALL = [
   { key: 'namaDepo', group: 'identity', label: 'Nama Depo', sticky: true, stickyLeft: 0, width: 210,
@@ -10214,11 +10361,12 @@ const REGIONAL_DEPO_PERF_COLUMNS_ALL = [
     value: r => fmtNumber(r.totalSalesman), csvValue: r => r.totalSalesman },
   { key: 'scJks', kpiId: 'scJks', group: 'process', label: 'SC/JKS', width: 92, value: r => fmtPercent(r.kpi.scJks.actual), csvValue: r => r.kpi.scJks.actual },
   { key: 'geofencing', kpiId: 'geofencing', group: 'process', label: 'GEO', width: 86, value: r => fmtPercent(r.kpi.geofencing.actual), csvValue: r => r.kpi.geofencing.actual },
-  { key: 'avgEc', kpiId: 'avgEcAch', group: 'productivity', label: 'AVG EC', width: 82, value: r => { const v = rdpAvgEc(r); return v === null ? '-' : fmtNumber(v, 0); }, csvValue: r => rdpAvgEc(r) },
+  { key: 'avgScEsuite', kpiId: 'hitRate', group: 'productivity', label: 'AVG SC', width: 104, value: r => fmtSupportAverage(rdpAvgScEsuite(r)), csvValue: r => rdpAvgScEsuite(r) },
+  { key: 'avgEc', kpiId: 'avgEcAch', group: 'productivity', label: 'AVG EC', width: 82, value: r => fmtSupportAverage(rdpAvgEc(r)), csvValue: r => rdpAvgEc(r) },
+  { key: 'hitRate', kpiId: 'hitRate', group: 'productivity', label: 'HIT RATE EC', width: 104, value: r => fmtPercent(r.kpi.hitRate.actual), csvValue: r => r.kpi.hitRate.actual },
   { key: 'tgtRoa', kpiId: 'roaCb', group: 'productivity', label: 'TGT ROA', width: 90, value: r => fmtNumber(r.sums.cb, 0), csvValue: r => r.sums.cb },
   { key: 'roa', kpiId: 'roaCb', group: 'productivity', label: 'ROA', width: 86, value: r => fmtNumber(r.sums.roa, 0), csvValue: r => r.sums.roa },
   { key: 'roaCb', kpiId: 'roaCb', group: 'productivity', label: '%ROA', width: 86, value: r => fmtPercent(r.kpi.roaCb.actual), csvValue: r => r.kpi.roaCb.actual },
-  { key: 'hitRate', kpiId: 'hitRate', group: 'productivity', label: 'EC VS CALL TOTAL', width: 120, value: r => fmtPercent(r.kpi.hitRate.actual), csvValue: r => r.kpi.hitRate.actual },
   { key: 'targetOmzet', kpiId: 'revenue', group: 'revenue', label: 'TGT OMZ', width: 104, value: r => rankingCompactMoneyHtml(r.revenueNominal.target), csvValue: r => r.revenueNominal.target },
   { key: 'omzetAktual', kpiId: 'revenue', group: 'revenue', label: 'OMZET', width: 104, value: r => rankingCompactMoneyHtml(r.revenueNominal.actual), csvValue: r => r.revenueNominal.actual },
   { key: 'achOmzet', kpiId: 'revenue', group: 'revenue', label: '% OMZ', width: 84, value: r => fmtPercent(r.kpi.revenue.actual), csvValue: r => r.kpi.revenue.actual },
@@ -10256,11 +10404,13 @@ function getRegionalDepoPerformanceData(regionRow) {
 function buildRegionalPerformanceSummaryHtml(regionRow, depoRows) {
   const jumlahDepo = depoRows.length;
   const totalSalesman = regionRow.totalSalesman;
-  const avgEcRegional = safeDivide(regionRow.sums.avgEc, regionRow.eligibleSalesman);
+  const avgEcRegional = rankingAverageEc(regionRow);
+  const avgScRegional = rankingAvgScEsuite(regionRow);
   const items = [
     { label: 'Jumlah Depo', value: fmtNumber(jumlahDepo) },
     { label: 'Total Salesman', value: fmtNumber(totalSalesman) },
-    ...(isKpiActive('avgEcAch') ? [{ label: 'Rata-rata EC', value: avgEcRegional === null ? '-' : fmtNumber(avgEcRegional, 2) }] : []),
+    ...(isKpiActive('hitRate') ? [{ label: 'Rata-rata SC', value: fmtSupportAverage(avgScRegional) }] : []),
+    ...(isKpiActive('avgEcAch') ? [{ label: 'Rata-rata EC', value: fmtSupportAverage(avgEcRegional) }] : []),
     ...(isKpiActive('revenue') ? [{ label: 'Total Omset', value: fmtPercent(regionRow.kpi.revenue.actual) }] : []),
     ...(isKpiActive('roaCb') ? [{ label: 'ROA', value: fmtPercent(regionRow.kpi.roaCb.actual) }] : []),
     { label: 'Final Score', value: fmtNumber(regionRow.finalScore, 2) },
@@ -10325,7 +10475,7 @@ function buildRegionalDepoPerformanceTableHtml(depoRows, options = {}) {
 
 /* ============================================================
    REUSABLE RANKING DRILL-DOWN MODAL
-   Phase → Regional → Depo → ASS → Salesman → Detail Pencapaian
+   Phase → Regional → Cabang → ASS → Depo → Salesman → Detail Pencapaian
    Satu modal dipakai ulang; breadcrumb dan tombol kembali mempertahankan konteks.
    ============================================================ */
 function drilldownEntityName(level, row) {
@@ -10341,31 +10491,63 @@ function drilldownEntityName(level, row) {
 function drilldownLevelLabel(level) {
   return ({ phase: 'Phase', regional: 'Regional', cabang: 'Cabang', depo: 'Depo', ass: 'ASS', salesman: 'Salesman' })[level] || level;
 }
-// hierarchy diperlukan untuk level 'regional' karena anak levelnya kondisional: Cabang jika Master Cabang
-// tersedia pada hierarchy ini, langsung Depo jika tidak (lihat instruksi A4 — jangan buat data Cabang palsu).
+// Hierarki drill-down FINAL: Regional -> Cabang -> ASS -> Depo -> Salesman -> Detail Salesman.
+// ASS berada SEBELUM Depo karena satu ASS dapat menangani lebih dari satu Depo.
+// hierarchy diperlukan untuk level 'regional' karena anak levelnya kondisional: Cabang jika Master
+// Cabang tersedia, langsung ASS jika tidak (jangan pernah membuat data Cabang palsu).
 function drilldownChildLevel(level, hierarchy) {
-  if (level === 'regional') return (hierarchy && hierarchy.hasMasterCabang) ? 'cabang' : 'depo';
-  return ({ phase: 'regional', cabang: 'depo', depo: 'ass', ass: 'salesman' })[level] || null;
+  if (level === 'regional') return (hierarchy && hierarchy.hasMasterCabang) ? 'cabang' : 'ass';
+  return ({ phase: 'regional', cabang: 'ass', ass: 'depo', depo: 'salesman' })[level] || null;
 }
-function drilldownRows(parentLevel, parentRow, hierarchy) {
+// Ancestor ASS pada stack drill-down (null bila user masuk langsung dari Ranking Depo).
+function drilldownAncestorAssKey(stack) {
+  if (!Array.isArray(stack)) return null;
+  for (let i = stack.length - 1; i >= 0; i--) if (stack[i] && stack[i].level === 'ass') return stack[i].row ? stack[i].row.key : null;
+  return null;
+}
+// Depo dalam scope SATU ASS. Diagregasi ulang dari eligibleMembers ASS tersebut memakai
+// aggregateByGroup() + settings yang sama dengan hierarchy, sehingga angka Depo di sini
+// benar-benar merepresentasikan irisan ASS x Depo dan reconcile dengan daftar Salesman-nya.
+function drilldownAssScopedDepoRows(assRow, hierarchy) {
+  const members = (assRow && assRow.eligibleMembers) || [];
+  if (!members.length) return [];
+  const settings = (hierarchy && hierarchy.__settings) || currentKpiSettings();
+  const rows = aggregateByGroup(members, members, rec => getDepoKey(rec),
+    rec => ({ depo: rec.depo, kodeDepo: rec.kodeDepo, region: rec.region, namaAss: rec.namaAss, nikAss: rec.nikAss }), settings);
+  const masterByKode = State.masterCabang && State.masterCabang.byKodeDepo ? State.masterCabang.byKodeDepo : null;
+  rows.forEach(row => {
+    const entry = masterByKode ? masterByKode.get(normalizeCabangCode(row.meta.kodeDepo)) : null;
+    row.meta.cabang = entry ? entry.cabang : null;
+    row.assCount = 1;
+  });
+  return rows;
+}
+function drilldownRows(parentLevel, parentRow, hierarchy, stack) {
   if (!hierarchy || !parentRow) return [];
   if (parentLevel === 'phase') return hierarchy.byRegion || [];
   if (parentLevel === 'regional') {
     const region = parentRow.meta && parentRow.meta.region;
     if (hierarchy.hasMasterCabang) return (hierarchy.byCabang || []).filter(row => row.meta && row.meta.region === region);
-    return (hierarchy.byDepo || []).filter(row => row.meta && row.meta.region === region);
+    // Tanpa Master Cabang level Cabang dilewati: Regional langsung ke ASS di dalam Regional itu.
+    return (hierarchy.byAss || []).filter(row => (row.eligibleMembers || []).some(member => member.region === region));
   }
   if (parentLevel === 'cabang') {
+    // ASS yang memiliki minimal satu salesman pada Cabang ini. Identitas ASS memakai NIK ASS
+    // (getAssKey) sehingga dua ASS bernama sama tidak pernah tercampur.
     const cabang = parentRow.meta && parentRow.meta.cabang;
-    return (hierarchy.byDepo || []).filter(row => row.meta && row.meta.cabang === cabang);
-  }
-  if (parentLevel === 'depo') {
-    return (hierarchy.byAss || []).filter(row =>
-      (row.eligibleMembers || []).some(member => getDepoKey(member) === parentRow.key)
-    );
+    const depoKeysInCabang = new Set((hierarchy.byDepo || []).filter(row => row.meta && row.meta.cabang === cabang).map(row => row.key));
+    return (hierarchy.byAss || []).filter(row => (row.eligibleMembers || []).some(member => depoKeysInCabang.has(getDepoKey(member))));
   }
   if (parentLevel === 'ass') {
-    return (hierarchy.salesmanScored || []).filter(row => getAssKey(row.rec) === parentRow.key);
+    // Hanya Depo yang benar-benar ditangani ASS ini (satu ASS bisa >1 Depo).
+    return drilldownAssScopedDepoRows(parentRow, hierarchy);
+  }
+  if (parentLevel === 'depo') {
+    // Salesman pada Depo ini; bila ada ancestor ASS pada stack, dipersempit ke ASS tersebut
+    // supaya context ASS tidak tercampur dengan ASS lain pada Depo yang sama.
+    const assKey = drilldownAncestorAssKey(stack);
+    return (hierarchy.salesmanScored || []).filter(row => getDepoKey(row.rec) === parentRow.key
+      && (assKey === null || getAssKey(row.rec) === assKey));
   }
   return [];
 }
@@ -10376,10 +10558,14 @@ function drilldownNameGetter(level) {
   if (level === 'ass') return row => row.meta && row.meta.namaAss;
   return row => row.rec && row.rec.namaSalesman;
 }
-function drilldownColumns(level) {
+function drilldownColumns(level, hierarchy) {
+  // Label tombol detail selalu mengikuti anak level pada hierarki FINAL
+  // (Regional -> Cabang -> ASS -> Depo -> Salesman -> Detail Salesman).
+  const nextLevel = drilldownChildLevel(level, hierarchy);
+  const childLabel = nextLevel ? `Lihat ${drilldownLevelLabel(nextLevel)}` : 'Lihat Pencapaian';
   if (level === 'regional') {
     return rankingColumns({
-      nameKey: 'meta.region', nameLabel: 'Regional', showTotalSalesman: false, detailLabel: 'Lihat Cabang',
+      nameKey: 'meta.region', nameLabel: 'Regional', showTotalSalesman: false, detailLabel: childLabel,
       nameMetaFn: row => joinMeta([formatCountMeta(row.depoCount, 'depo'), formatCountMeta(row.totalSalesman, 'salesman')]),
       extraCols: [
         { key: 'depoCount', label: 'Jumlah Depo', render: row => fmtNumber(row.depoCount || 0), csvOnly: true, excludeFromJpg: true },
@@ -10389,7 +10575,7 @@ function drilldownColumns(level) {
   }
   if (level === 'cabang') {
     return rankingColumns({
-      nameKey: 'meta.cabang', nameLabel: 'Cabang', showTotalSalesman: false, detailLabel: 'Lihat Depo',
+      nameKey: 'meta.cabang', nameLabel: 'Cabang', showTotalSalesman: false, detailLabel: childLabel,
       nameMetaFn: row => joinMeta([row.meta.region, formatCountMeta(row.depoCount, 'depo'), formatCountMeta(row.totalSalesman, 'salesman')]),
       extraCols: [
         { key: 'meta.region', label: 'Regional', render: row => escapeHtml(row.meta.region || '-'), csvOnly: true, excludeFromJpg: true },
@@ -10400,8 +10586,8 @@ function drilldownColumns(level) {
   }
   if (level === 'depo') {
     return rankingColumns({
-      nameKey: 'meta.depo', nameLabel: 'Nama Depo', showTotalSalesman: false, detailLabel: 'Lihat ASS',
-      nameMetaFn: row => joinMeta([row.meta.kodeDepo, row.meta.cabang, row.meta.region, formatCountMeta(row.totalSalesman, 'salesman')]),
+      nameKey: 'meta.depo', nameLabel: 'Nama Depo', showTotalSalesman: false, detailLabel: childLabel,
+      nameMetaFn: row => joinMeta([row.meta.kodeDepo, row.meta.namaAss, row.meta.cabang, row.meta.region, formatCountMeta(row.totalSalesman, 'salesman')]),
       extraCols: [
         { key: 'meta.kodeDepo', label: 'Kode Depo', render: row => escapeHtml(row.meta.kodeDepo || '-'), csvOnly: true, excludeFromJpg: true },
         { key: 'meta.cabang', label: 'Cabang', render: row => escapeHtml(row.meta.cabang || '-'), csvOnly: true, excludeFromJpg: true },
@@ -10411,7 +10597,7 @@ function drilldownColumns(level) {
   }
   if (level === 'ass') {
     return rankingColumns({
-      nameKey: 'meta.namaAss', nameLabel: 'Nama ASS', showTotalSalesman: false, detailLabel: 'Lihat Salesman',
+      nameKey: 'meta.namaAss', nameLabel: 'Nama ASS', showTotalSalesman: false, detailLabel: childLabel,
       nameMetaFn: row => joinMeta([formatNikMeta(row.meta.nikAss), row.meta.depo, formatCountMeta(row.totalSalesman, 'salesman')]),
       extraCols: [
         { key: 'meta.nikAss', label: 'NIK ASS', render: row => escapeHtml(row.meta.nikAss || '-'), csvOnly: true, excludeFromJpg: true },
@@ -10444,7 +10630,7 @@ function openRankingDrilldownModal(startLevel, startRow, options = {}) {
     const current = stack[stack.length - 1];
     const childLevel = drilldownChildLevel(current.level, hierarchy);
     if (!childLevel) return;
-    const rawRows = drilldownRows(current.level, current.row, hierarchy).map(row => ({ ...row }));
+    const rawRows = drilldownRows(current.level, current.row, hierarchy, stack).map(row => ({ ...row }));
     const ranked = rankList(rawRows, drilldownNameGetter(childLevel));
     ranked.forEach(row => { row.comparison = { available: false, isNew: false }; });
     const parentLabel = `${drilldownLevelLabel(current.level)} — ${drilldownEntityName(current.level, current.row)}`;
@@ -10478,12 +10664,14 @@ function openRankingDrilldownModal(startLevel, startRow, options = {}) {
     const table = new DataTable({
       containerId: 'dt-ranking-drilldown',
       exportFilename: `ranking-${childLevel}-${sanitizeFilenamePart(drilldownEntityName(current.level, current.row))}.csv`,
-      searchableKeys: childLevel === 'salesman'
-        ? ['rec.namaSalesman', 'rec.kodeSalesman', 'rec.namaAss', 'rec.depo', 'rec.region']
-        : childLevel === 'regional' ? ['meta.region']
-        : childLevel === 'depo' ? ['meta.depo', 'meta.kodeDepo', 'meta.region']
-        : ['meta.namaAss', 'meta.nikAss', 'meta.depo', 'meta.region'],
-      columns: drilldownColumns(childLevel), data: ranked,
+      searchableKeys: ({
+        salesman: ['rec.namaSalesman', 'rec.kodeSalesman', 'rec.namaAss', 'rec.depo', 'rec.region'],
+        regional: ['meta.region'],
+        cabang: ['meta.cabang', 'meta.region'],
+        depo: ['meta.depo', 'meta.kodeDepo', 'meta.region'],
+        ass: ['meta.namaAss', 'meta.nikAss', 'meta.depo', 'meta.region']
+      })[childLevel] || ['meta.namaAss', 'meta.nikAss', 'meta.depo', 'meta.region'],
+      columns: drilldownColumns(childLevel, hierarchy), data: ranked,
       isRankingTable: true, rankingTotal: ranked.length, sortingEnabled: true, quickStatusEnabled: false,
       rowDetailFn: childLevel === 'salesman'
         ? row => openSalesmanDetailDrawer(row)
@@ -10594,7 +10782,7 @@ async function exportRegionalDepoPerformanceExcel(regionRow, depoRows) {
 const DETAIL_KPI_ORDER = ['scJks', 'geofencing', 'roaCb', 'hitRate', 'avgEcAch', 'strata2', 'revenue'];
 function detailKpiActiveOrder() { return DETAIL_KPI_ORDER.filter(id => isKpiActive(id)); }
 const DETAIL_KPI_SHORT_LABELS = {
-  scJks: 'SC vs JKS', geofencing: 'Geofencing', roaCb: 'ROA', hitRate: 'EC vs Call Total',
+  scJks: 'SC vs JKS', geofencing: 'Geofencing', roaCb: 'ROA', hitRate: 'Hit Rate EC',
   avgEcAch: 'Golden EC', revenue: 'Total Omset', strata2: 'EPB Strata 2'
 };
 const DETAIL_KPI_CAPPED_NORMAL_IDS = new Set(['scJks', 'geofencing', 'roaCb', 'hitRate']);
@@ -10845,22 +11033,23 @@ function renderDetailKpiDistributionList({ containerId, kpiId, rows, level, scop
     row.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openBucket(index); } });
   });
 }
-// Urutan hierarki drill-down popup bucket Detail KPI. SELALU dimulai dari Phase, lalu mengikuti
-// struktur organisasi Regional -> Depo -> ASS -> Salesman, tapi BERHENTI tepat di basis level KPI
-// yang sedang aktif (mis. jika Level Detail KPI = Depo, drill-down berhenti di Depo sebagai leaf,
-// karena bucket dibentuk dari nilai Depo, bukan dari nilai Salesman di bawahnya — lihat C5 instruksi).
-// G: urutan hierarki organisasi popup bucket Detail KPI (TIDAK termasuk Phase - Phase hanya filter di belakang layar).
-// Khusus dipakai oleh openDetailKpiBucketModal() - TIDAK memengaruhi reusable ranking drill-down menu lain.
-const DETAIL_KPI_ORG_ORDER = ['regional', 'cabang', 'depo', 'ass', 'salesman'];
-// D2/H: level anak organisasi SETELAH basisLevel (entry level), sesuai alur per-level di instruksi H2-H5.
-// Catatan khusus: ASS sebagai ENTRY level -> anaknya Depo dulu (bukan langsung Salesman), karena satu ASS bisa
-// membawahi >1 Depo dan pengguna perlu memilih Depo mana dulu. Di luar kasus itu, klik ASS langsung ke Salesman.
+// HIERARKI ORGANISASI FINAL — SATU mental model untuk seluruh aplikasi:
+// Regional -> Cabang -> ASS -> Depo -> Salesman -> Detail Salesman.
+// ASS berada SEBELUM Depo karena satu ASS dapat membawahi lebih dari satu Depo, sehingga
+// pengguna memilih ASS penanggung jawab lebih dulu, baru Depo yang ditanganinya.
+// Konstanta ini bersifat DEKLARATIF (dokumentasi urutan level); resolver anak level yang
+// benar-benar dipakai openDetailKpiBucketModal() adalah detailKpiChildOrgLevels() di bawah.
+const DETAIL_KPI_ORG_ORDER = ['regional', 'cabang', 'ass', 'depo', 'salesman'];
+// Level anak organisasi SETELAH basisLevel (entry level Detail KPI). Drill-down berhenti di
+// Salesman sebagai leaf (klik Salesman -> Detail Salesman existing), dan tidak pernah memaksa
+// pengguna naik kembali ke parent yang sudah tidak diperlukan pada entry level tersebut.
+// Tanpa Master Cabang, level Cabang dilewati (jangan pernah membuat data Cabang palsu).
 function detailKpiChildOrgLevels(basisLevel) {
   const hasCabang = !!(State.masterCabang && State.masterCabang.byKodeDepo && State.masterCabang.byKodeDepo.size);
-  if (basisLevel === 'regional') return hasCabang ? ['cabang', 'depo', 'ass', 'salesman'] : ['depo', 'ass', 'salesman'];
-  if (basisLevel === 'cabang') return ['depo', 'ass', 'salesman'];
-  if (basisLevel === 'depo') return ['ass', 'salesman'];
-  if (basisLevel === 'ass') return ['depo', 'salesman']; // H5: ASS entry -> Depo -> Salesman
+  if (basisLevel === 'regional') return hasCabang ? ['cabang', 'ass', 'depo', 'salesman'] : ['ass', 'depo', 'salesman'];
+  if (basisLevel === 'cabang') return ['ass', 'depo', 'salesman'];
+  if (basisLevel === 'ass') return ['depo', 'salesman'];
+  if (basisLevel === 'depo') return ['salesman'];
   return []; // basisLevel === 'salesman' -> langsung leaf, tidak ada anak
 }
 // G1: seluruh Cabang UNIK yang terkait satu entitas (dedup by Cabang). Salesman/Depo pasti satu Cabang;
@@ -10936,8 +11125,9 @@ function buildDetailKpiDrillHierarchy(phaseLabel, outerScope, outerScopeValue, s
   let records = getCalculationRecords(State.activeSnapshot);
   const outerPred = detailKpiPredicateForScope(outerScope, outerScopeValue);
   if (outerPred) records = records.filter(outerPred);
-  // Rantai SEMUA seleksi drill-down (bukan hanya yang terakhir) - penting untuk alur ASS -> Depo -> Salesman
-  // agar Salesman yang muncul benar-benar milik ASS terpilih DI DALAM Depo terpilih (satu Depo bisa dilayani >1 ASS).
+  // Rantai SEMUA seleksi drill-down (bukan hanya yang terakhir) - inilah yang menjaga ancestor context
+  // pada alur Cabang -> ASS -> Depo -> Salesman: Salesman yang muncul benar-benar milik ASS terpilih
+  // DI DALAM Depo terpilih (satu Depo bisa dilayani >1 ASS, satu ASS bisa memegang >1 Depo).
   (stackChain || []).forEach(sel => {
     const pred = detailKpiPredicateForScope(sel.levelKey, sel.key);
     if (pred) records = records.filter(pred);
@@ -10958,7 +11148,7 @@ function detailKpiBucketEntitiesForHierarchy(hierarchy, basisLevel, kpiId, bucke
 }
 
 // ============================================================
-// POPUP BUCKET DETAIL KPI — drill-down organisasi (V25): Regional -> Cabang -> Depo -> ASS -> Salesman,
+// POPUP BUCKET DETAIL KPI — drill-down organisasi: Regional -> Cabang -> ASS -> Depo -> Salesman,
 // dimulai dari Level Detail KPI aktif, TANPA tahap Phase (Phase tetap filter aktif di belakang layar).
 // ============================================================
 function openDetailKpiBucketModal({ bucket, kpiId, kpiDef, basisLevel, scope, scopeValue, levelLabel, scopeLabel, bucketCount, totalValid }) {
@@ -11508,8 +11698,7 @@ function renderDetailKpiPage(params) {
     <details class="detail-kpi-formula-details"><summary>Lihat Formula KPI</summary><div class="detail-kpi-formula-details-body"><strong id="dk-formula-label">-</strong><span id="dk-formula-text">-</span><span id="dk-formula-weight">-</span></div></details>
     <div class="detail-kpi-rank-grid"><div class="panel detail-kpi-rank-card top"><div class="detail-kpi-card-head"><div><div class="detail-kpi-card-title">Top 10</div><div class="detail-kpi-card-subtitle">Nilai KPI tertinggi</div></div></div><div id="dk-top10" style="display:flex;flex:1;min-height:0;"></div></div><div class="panel detail-kpi-rank-card bottom"><div class="detail-kpi-card-head"><div><div class="detail-kpi-card-title">Bottom 10</div><div class="detail-kpi-card-subtitle">Nilai KPI terendah</div></div></div><div id="dk-bottom10" style="display:flex;flex:1;min-height:0;"></div></div></div>
     <div class="panel detail-kpi-detail-card"><div class="detail-kpi-card-head"><div><div class="detail-kpi-card-title">Tabel Detail KPI</div><div class="detail-kpi-card-subtitle" id="dk-table-info">Urutan nilai tertinggi</div></div></div><div class="detail-kpi-table-tools"><input type="search" class="detail-kpi-table-search" id="dk-detail-search" placeholder="Cari entitas..."/><button class="btn btn-outline btn-sm" id="dk-detail-excel">Excel</button><button class="btn btn-outline btn-sm" id="dk-detail-jpg">JPG</button></div><div class="detail-kpi-table-scroll"><table class="detail-kpi-table"><thead><tr><th>Rank</th><th>Entitas</th><th id="dk-value-header">Nilai KPI</th></tr></thead><tbody id="dk-detail-table-body"></tbody></table></div></div>`;
-  return `<div class="page-header"><h1>Detail KPI</h1><p class="page-sub">Analisis KPI aktif berdasarkan level, scope, dan Phase.</p></div>
-    ${globalFilter}
+  return `${globalFilter}
     <div class="detail-kpi-tabs-row">
       <div class="detail-kpi-tabs"><button class="detail-kpi-tab ${tab === 'summary' ? 'active' : ''}" data-dk-tab="summary">Ringkasan KPI</button><button class="detail-kpi-tab ${tab === 'ranking' ? 'active' : ''}" data-dk-tab="ranking">Peringkat & Detail</button></div>
       ${tab === 'summary' ? `<div class="detail-kpi-download-wrap"><button class="btn btn-primary btn-sm" id="dk-download-toggle">Download JPG ▾</button><div class="detail-kpi-download-menu" id="dk-download-menu"><button class="detail-kpi-download-option" id="dk-download-summary">Download 7 Summary Card</button><button class="detail-kpi-download-option" id="dk-download-main">Download Tampilan Utama</button></div></div>` : ''}
@@ -11644,8 +11833,7 @@ function renderBelumEligiblePage() {
   const asses = [...new Set(v.notEligible.map(r => r.namaAss))].filter(Boolean).sort();
   const errorTypes = [...new Set(v.notEligible.flatMap(r => r.__reasons.map(x => x.message)))].sort();
   const colTypes = [...new Set(v.notEligible.flatMap(r => r.__reasons.map(x => x.field)))].sort();
-  return `<div class="page-header"><h1>Data Belum Memenuhi Syarat</h1><p class="page-sub">Data Salesman yang belum dapat masuk ranking utama beserta penyebabnya.</p></div>
-    <div class="panel">
+  return `<div class="panel">
       <div class="filter-row">
         <label>Regional:<select id="be-region"><option value="">Semua</option>${regions.map(r => `<option>${escapeHtml(r)}</option>`).join('')}</select></label>
         <label>Depo:<select id="be-depo"><option value="">Semua</option>${depos.map(d => `<option>${escapeHtml(d)}</option>`).join('')}</select></label>
@@ -11711,8 +11899,7 @@ function renderBelumEligibleTable(data, activeFilters) {
    ============================================================ */
 function renderUploadPage(params) {
   const tab = params.get('tab') || 'baru';
-  return `<div class="page-header"><h1>Upload Data</h1><p class="page-sub">Upload file Excel harian, Master Cabang, atau lihat riwayat upload sebelumnya.</p></div>
-    <div class="tabs">
+  return `<div class="tabs">
       <button class="tab-btn ${tab === 'baru' ? 'active' : ''}" data-tab="baru">Upload Data KPI Harian</button>
       <button class="tab-btn ${tab === 'master-cabang' ? 'active' : ''}" data-tab="master-cabang">Upload Master Cabang</button>
       <button class="tab-btn ${tab === 'riwayat' ? 'active' : ''}" data-tab="riwayat">Riwayat Upload</button>
@@ -12634,7 +12821,6 @@ function renderDataSumberPage() {
   const records = snap ? snap.rawRecords : [];
   const totalKolom = APP_CONFIG.FIELD_MAP.length;
   return `
-    <div class="page-header"><h1>Data Sumber Excel</h1><p class="page-sub">Viewer read-only data mentah hasil upload — untuk audit sumber angka tanpa membuka Excel manual.</p></div>
     <div class="snapshot-meta-bar">
       <div><span class="meta-label">File</span><span class="meta-value">${escapeHtml(snap ? snap.fileName : '-')}</span></div>
       <div><span class="meta-label">Worksheet</span><span class="meta-value">${escapeHtml(snap ? (snap.sheetName || '-') : '-')}</span></div>
@@ -12941,8 +13127,7 @@ function renderPengaturanPage() {
   const s = currentKpiSettings();
   const config = s.__kpiConfiguration;
   const activeCount = activeKpiDefs(s).length;
-  return `<div class="page-header"><h1>Pengaturan KPI</h1><p class="page-sub">Siapkan draft KPI, lalu terapkan ke satu atau beberapa periode.</p></div>
-    <div class="kpi-config-summary"><strong>Konfigurasi periode aktif</strong><span>${escapeHtml(periodMonthLabel(snapshotPeriodKey(State.activeSnapshot) || State.activePeriodKey) || '-')}</span><span>${activeCount} KPI Aktif</span><span>Total Bobot ${fmtNumber(totalWeight(s.weights), 2)}%</span><span>${escapeHtml(kpiConfigurationResolutionLabel(config))}</span></div>
+  return `<div class="kpi-config-summary"><strong>Konfigurasi periode aktif</strong><span>${escapeHtml(periodMonthLabel(snapshotPeriodKey(State.activeSnapshot) || State.activePeriodKey) || '-')}</span><span>${activeCount} KPI Aktif</span><span>Total Bobot ${fmtNumber(totalWeight(s.weights), 2)}%</span><span>${escapeHtml(kpiConfigurationResolutionLabel(config))}</span></div>
     <div class="alert alert-info">Perubahan pada form masih berupa draft dan tidak mengubah ranking sampai tombol Terapkan dikonfirmasi.</div>
     <div class="panel">
       <table class="settings-table">
@@ -13138,28 +13323,47 @@ function hitRateScoreModel(snapshot) {
   return String(snapshot.hitRateFormulaVersion || 'avgEc_div_totalCallEsuite_v1');
 }
 /**
+ * REGISTRY FORMULA HIT RATE — satu tempat untuk seluruh versi resmi.
+ * Setiap versi membawa denominator mode + aggregation mode sendiri sehingga snapshot official
+ * yang sudah pernah dipublikasikan TIDAK ikut berubah ketika formula current dinaikkan.
+ * - ec_vs_call_esuite_ratio_v1        : salesman AVG EC ÷ TOTAL CALL ESUITE, Depo ke atas = mean persen salesman.
+ * - ec_vs_call_esuite_paired_ratio_v2 : salesman AVG EC ÷ TOTAL CALL ESUITE, Depo ke atas = RATIO OF SUMS
+ *                                       pada populasi salesman berpasangan valid (AVG EC & AVG SC eSuite).
+ * Versi di luar registry diperlakukan sebagai legacy historis dan memakai resolver lama.
+ */
+const HIT_RATE_FORMULA_MODEL_REGISTRY = Object.freeze({
+  'ec_vs_call_esuite_ratio_v1': Object.freeze({ hitRateMode: 'total_call_esuite_ratio', hitRateAggregationMode: 'mean_salesman_percent' }),
+  'ec_vs_call_esuite_paired_ratio_v2': Object.freeze({ hitRateMode: 'total_call_esuite_ratio', hitRateAggregationMode: 'paired_ratio_of_sums' })
+});
+function hitRateRegistryEntry(version) {
+  return Object.prototype.hasOwnProperty.call(HIT_RATE_FORMULA_MODEL_REGISTRY, String(version || ''))
+    ? HIT_RATE_FORMULA_MODEL_REGISTRY[String(version)] : null;
+}
+/**
  * Satu resolver formula untuk seluruh reconstruction ranking.
  * Model hanya berasal dari metadata/struktur snapshot, tidak pernah dari bulan.
  * Snapshot null berarti proses current/non-historical (upload/demo sebelum aktif).
  */
 function resolveSnapshotFormulaModel(snapshot) {
   if (!snapshot) {
+    const currentEntry = hitRateRegistryEntry(APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION)
+      || { hitRateMode: 'total_call_esuite_ratio', hitRateAggregationMode: 'paired_ratio_of_sums' };
     return Object.freeze({
       hitRateFormulaVersion: APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION,
-      hitRateMode: 'total_call_esuite_ratio',
-      hitRateAggregationMode: 'mean_salesman_percent',
+      hitRateMode: currentEntry.hitRateMode,
+      hitRateAggregationMode: currentEntry.hitRateAggregationMode,
       tatFormulaVersion: APP_CONFIG.CURRENT_TAT_FORMULA_VERSION,
       tatScoringMode: 'achievement_div_tat',
-      signature: `hit:${APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION}|hitAgg:mean_salesman_percent|tat:${APP_CONFIG.CURRENT_TAT_FORMULA_VERSION}`
+      signature: `hit:${APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION}|hitAgg:${currentEntry.hitRateAggregationMode}|tat:${APP_CONFIG.CURRENT_TAT_FORMULA_VERSION}`
     });
   }
   const hitRateFormulaVersion = hitRateScoreModel(snapshot);
   const tatFormulaVersion = tatScoreModel(snapshot);
-  const hitRateMode = hitRateFormulaVersion === APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION
-    ? 'total_call_esuite_ratio'
+  // Versi terdaftar memakai definisi miliknya sendiri; versi lain tetap memakai resolver legacy lama.
+  const registryEntry = hitRateRegistryEntry(hitRateFormulaVersion);
+  const hitRateMode = registryEntry ? registryEntry.hitRateMode
     : (String(snapshot.hitRateSourceKey || '') === 'effectiveTotalCallDay' ? 'effective_total_call_day' : 'legacy_total_call_esuite');
-  const hitRateAggregationMode = hitRateFormulaVersion === APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION
-    ? 'mean_salesman_percent' : 'ratio_of_sums';
+  const hitRateAggregationMode = registryEntry ? registryEntry.hitRateAggregationMode : 'ratio_of_sums';
   const tatScoringMode = tatFormulaVersion === APP_CONFIG.CURRENT_TAT_FORMULA_VERSION
     ? 'achievement_div_tat' : 'legacy_achievement';
   return Object.freeze({
