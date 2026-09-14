@@ -1332,9 +1332,9 @@ const APP_CONFIG = {
   STORE_MASTER_CABANG: 'masterCabang',
   STORE_VIEWER_CACHE: 'viewerCache',
   CURRENT_DATA_SCHEMA_VERSION: 5,
-  // EC vs Call Total memakai denominator Call/Day efektif dari dua source Excel.
-  CURRENT_HIT_RATE_SOURCE: 'effectiveTotalCallDay',
-  CURRENT_HIT_RATE_FORMULA_VERSION: 'avgEc_div_effectiveTotalCallDay_v2',
+  // Formula current: hanya AVG EC ÷ TOTAL CALL ESUITE.
+  CURRENT_HIT_RATE_SOURCE: 'totalCallEsuite',
+  CURRENT_HIT_RATE_FORMULA_VERSION: 'ec_vs_call_esuite_ratio_v1',
   CURRENT_TAT_SOURCE: 'tatMtd',
   CURRENT_TAT_FORMULA_VERSION: 'achievement_div_tat_v1',
   STORE_SETTINGS: 'settings',
@@ -1362,7 +1362,7 @@ const APP_CONFIG = {
     { key: 'roa', aliases: ['ROA'], fallbackCol: 13, type: 'number', group: 'kpi' },
     { key: 'pctAchMtdRoaCb', aliases: ['%ACH MTD'], fallbackCol: 14, type: 'percent', group: 'kpi' },
 
-    // Kedua source Call diparse terpisah; resolver Effective Total Call / Day memilih hasil normalisasi terbaik.
+    // Kedua source Call diparse terpisah; resolver TOTAL CALL ESUITE memilih hasil normalisasi terbaik.
     { key: 'totalCallDay', aliases: ['TOTAL CALL/DAY', 'TOTAL CALL / DAY'], fallbackCol: 18, type: 'number', group: 'support' },
     { key: 'tgtScJks', aliases: ['TGT SC JKS'], fallbackCol: 19, type: 'number', group: 'kpi' },
     { key: 'achScVsJks', aliases: ['ACH SC VS JKS'], fallbackCol: 20, type: 'number', group: 'kpi' },
@@ -1409,9 +1409,8 @@ const APP_CONFIG = {
       info: '≥90% Perfect, 85-89.99% Good, <85% Perlu Ditingkatkan.',
       categoryFn: (v) => v >= 90 ? { label: 'Perfect', cls: 'cat-perfect' } : v >= 85 ? { label: 'Good', cls: 'cat-good' } : { label: 'Perlu Ditingkatkan', cls: 'cat-bad' } },
     { id: 'hitRate', label: 'EC vs Call Total', group: 'productivity', groupLabel: 'Productivity', defaultWeight: 10,
-      formula: 'AVG EC ÷ Effective Total Call / Day × 100%', computeSalesman: (r, _avgEcTarget, formulaModel) => { const ratio = safeDivide(r.avgEc, hitRateDenominatorForRecord(r, formulaModel)); return ratio === null ? null : ratio * 100; },
-      numeratorField: 'avgEc', denominatorField: null,
-      alternativeRequiredGroups: [['totalCallEsuite', 'totalCallDay']],
+      formula: 'AVG EC ÷ TOTAL CALL ESUITE × 100%', computeSalesman: (r, _avgEcTarget, formulaModel) => { const ratio = safeDivide(r.avgEc, hitRateDenominatorForRecord(r, formulaModel)); return ratio === null ? null : ratio * 100; },
+      numeratorField: 'avgEc', denominatorField: 'totalCallEsuite',
       info: '100% Perfect, 80-99.99% Sangat Bagus, 70-79.99% Good, <70% Perlu Ditingkatkan.',
       categoryFn: (v) => v >= 100 ? { label: 'Perfect', cls: 'cat-perfect' } : v >= 80 ? { label: 'Sangat Bagus', cls: 'cat-great' } : v >= 70 ? { label: 'Good', cls: 'cat-good' } : { label: 'Perlu Ditingkatkan', cls: 'cat-bad' } },
     { id: 'avgEcAch', label: 'Golden EC', group: 'productivity', groupLabel: 'Productivity', defaultWeight: 15,
@@ -2601,11 +2600,11 @@ function applyEffectiveTotalCallContext(records, periodStatus, workdayMtd) {
 function hitRateDenominatorForRecord(record, formulaModel) {
   if (!record) return null;
   const model = formulaModel && formulaModel.hitRateMode ? formulaModel : null;
-  if (model && model.hitRateMode === 'legacy_total_call_esuite') return positiveFiniteCallNumber(record.totalCallEsuite);
   if (model && model.hitRateMode === 'effective_total_call_day') {
     return Object.prototype.hasOwnProperty.call(record, 'effectiveTotalCallDay')
       ? positiveFiniteCallNumber(record.effectiveTotalCallDay) : null;
   }
+  if (model && (model.hitRateMode === 'legacy_total_call_esuite' || model.hitRateMode === 'total_call_esuite_ratio')) return positiveFiniteCallNumber(record.totalCallEsuite);
   // Backward-compatible fallback untuk caller non-reconstruction: core validation,
   // hierarchy, Trend, dan comparison selalu mengirim model explicit.
   if (Object.prototype.hasOwnProperty.call(record, 'effectiveTotalCallDay')) return positiveFiniteCallNumber(record.effectiveTotalCallDay);
@@ -2616,10 +2615,9 @@ function prepareLocalEffectiveTotalCallSnapshot(snapshot) {
   if (snapshot.hitRateSourceKey === APP_CONFIG.CURRENT_HIT_RATE_SOURCE
       && snapshot.hitRateFormulaVersion === APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION
       && snapshotHasEffectiveTotalCallDay(snapshot)) return snapshot;
-  applyEffectiveTotalCallContext(snapshot.rawRecords, snapshotPeriodStatus(snapshot), snapshot.workdayMtd);
   snapshot.dataSchemaVersion = APP_CONFIG.CURRENT_DATA_SCHEMA_VERSION;
   snapshot.hitRateSourceKey = APP_CONFIG.CURRENT_HIT_RATE_SOURCE;
-  snapshot.hitRateSourceHeader = 'TOTAL CALL ESUITE | TOTAL CALL/DAY';
+  snapshot.hitRateSourceHeader = 'TOTAL CALL ESUITE';
   snapshot.hitRateFormulaVersion = APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION;
   return snapshot;
 }
@@ -3023,10 +3021,9 @@ function validateRow(rec, settings = currentKpiSettings()) {
   if (active.geofencing && (rec.geofencing === null || isNaN(rec.geofencing))) reasons.push({ field: 'geofencing', message: 'GEOFANCING bukan angka valid', value: rec.geofencing });
   if (active.roaCb && !(rec.cb > 0)) reasons.push({ field: 'cb', message: 'CB harus lebih dari 0', value: rec.cb });
   if (active.roaCb && (rec.roa === null || isNaN(rec.roa))) reasons.push({ field: 'roa', message: 'ROA bukan angka valid', value: rec.roa });
-  // Validasi memakai hasil resolver yang sama dengan scoring/agregasi. Record historis v1 yang belum
-  // memiliki field effective tetap divalidasi memakai denominator resmi versi lamanya.
+  // EC vs Call Total current hanya memakai TOTAL CALL ESUITE; snapshot historis tetap memakai modelnya.
   if (active.hitRate && hitRateDenominatorForRecord(rec, formulaModelForSettings(settings)) === null) {
-    reasons.push({ field: 'effectiveTotalCallDay', message: 'Effective Total Call / Day tidak valid', value: rec.effectiveTotalCallDay });
+    reasons.push({ field: 'totalCallEsuite', message: 'TOTAL CALL ESUITE tidak valid', value: rec.totalCallEsuite });
   }
   if ((active.hitRate || active.avgEcAch) && (rec.avgEc === null || isNaN(rec.avgEc))) reasons.push({ field: 'avgEc', message: 'AVG EC (EPD MTD) bukan angka valid', value: rec.avgEc });
   if (active.revenue && !(rec.tgtOmsFm > 0)) reasons.push({ field: 'tgtOmsFm', message: 'Target Revenue (Tgt Oms FM) harus lebih dari 0', value: rec.tgtOmsFm });
@@ -3201,7 +3198,7 @@ function aggregateByGroup(eligibleRecords, allRecords, keyFn, metaFn, settings) 
     if (!groups.has(key)) {
       groups.set(key, {
         key, meta: metaFn(rec), totalSalesman: 0, eligibleSalesman: 0, notEligibleSalesman: 0,
-        sums: { achScVsJks: 0, tgtScJks: 0, geofencing: 0, roa: 0, cb: 0, avgEc: 0, totalCallDay: 0, totalCallEsuite: 0, effectiveTotalCallDay: 0, mtdOmsFm: 0, tgtOmsFm: 0, achEpbPoinRoa: 0, tgtEpbStrata2: 0 },
+        sums: { achScVsJks: 0, tgtScJks: 0, geofencing: 0, roa: 0, cb: 0, avgEc: 0, totalCallDay: 0, totalCallEsuite: 0, effectiveTotalCallDay: 0, hitRateSum: 0, hitRateCount: 0, mtdOmsFm: 0, tgtOmsFm: 0, achEpbPoinRoa: 0, tgtEpbStrata2: 0 },
         tatMtd: isValidTatMtdValue(rec && rec.tatMtd) ? Number(rec.tatMtd) : null,
         eligibleMembers: []
       });
@@ -3216,6 +3213,8 @@ function aggregateByGroup(eligibleRecords, allRecords, keyFn, metaFn, settings) 
     s.geofencing += num(rec.geofencing); s.roa += num(rec.roa); s.cb += num(rec.cb);
     s.avgEc += num(rec.avgEc); s.totalCallDay += num(rec.totalCallDay); s.totalCallEsuite += num(rec.totalCallEsuite);
     s.effectiveTotalCallDay += num(hitRateDenominatorForRecord(rec, formulaModel));
+    const salesmanHitRate = calculateKpiForSalesman(APP_CONFIG.KPI_DEFS.find(def => def.id === 'hitRate'), rec, settings);
+    if (Number.isFinite(Number(salesmanHitRate))) { s.hitRateSum += Number(salesmanHitRate); s.hitRateCount++; }
     s.mtdOmsFm += num(rec.mtdOmsFm); s.tgtOmsFm += num(rec.tgtOmsFm);
     s.achEpbPoinRoa += num(rec.achEpbPoinRoa); s.tgtEpbStrata2 += num(rec.tgtEpbStrata2);
   });
@@ -3229,12 +3228,15 @@ function pctv(v) { return v === null ? null : v * 100; }
 function computeGroupKpisAndScore(g, settings) {
   const s = g.sums, cap = settings.scoreCap, weights = settings.weights, eligibleCount = g.eligibleSalesman;
   const formulaModel = formulaModelForSettings(settings);
+  const hitRateActual = formulaModel.hitRateAggregationMode === 'mean_salesman_percent'
+    ? (s.hitRateCount > 0 ? s.hitRateSum / s.hitRateCount : null)
+    : pctv(safeDivide(s.avgEc, s.effectiveTotalCallDay));
   const actuals = {
     scJks: pctv(safeDivide(s.achScVsJks, s.tgtScJks)),
     geofencing: pctv(safeDivide(s.geofencing, s.achScVsJks)),
     roaCb: pctv(safeDivide(s.roa, s.cb)),
-    // Agregat = SUM(AVG EC) ÷ SUM(Effective Total Call / Day) × 100%.
-    hitRate: pctv(safeDivide(s.avgEc, s.effectiveTotalCallDay)),
+    // Current = mean persen salesman valid; historical = ratio-of-sums sesuai model snapshot.
+    hitRate: hitRateActual,
     avgEcAch: pctv(safeDivide(s.avgEc, settings.avgEcTarget * eligibleCount)),
     revenue: pctv(safeDivide(s.mtdOmsFm, s.tgtOmsFm)),
     strata2: pctv(safeDivide(s.achEpbPoinRoa, s.tgtEpbStrata2))
@@ -5519,8 +5521,8 @@ function validateCanonicalSnapshot(snapshot, label) {
     if (!tatValidation.valid || Math.abs(tatValidation.tatMtd - Number(snapshot.tatMtd)) > 0.01) throw new Error(`${label}.rawRecords memiliki TAT MTD yang tidak konsisten.`);
   }
   if (snapshot.hitRateFormulaVersion === APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION) {
-    const malformed = snapshot.rawRecords.find(record => !record || !Object.prototype.hasOwnProperty.call(record, 'effectiveTotalCallDay') || !Object.prototype.hasOwnProperty.call(record, 'effectiveTotalCallSource'));
-    if (malformed) throw new Error(`${label}.rawRecords belum memiliki Effective Total Call / Day yang konsisten.`);
+    const malformed = snapshot.rawRecords.find(record => !record || !Object.prototype.hasOwnProperty.call(record, 'totalCallEsuite'));
+    if (malformed) throw new Error(`${label}.rawRecords belum memiliki TOTAL CALL ESUITE.`);
   }
   // Metadata periode bersifat LEGACY-TOLERANT: payload lama tanpa periodKey/periodStatus tetap
   // valid. Bila ADA, isinya wajib konsisten — periode tidak boleh berbeda bulan dari cutoffDate.
@@ -5612,7 +5614,6 @@ function validateActiveSnapshotForPublication(snapshot, settings) {
     throw new Error('Struktur source snapshot aktif belum lolos validasi upload. Upload ulang file sumber.');
   }
   const records = canonical.rawRecords.map(record => ({ ...record }));
-  applyEffectiveTotalCallContext(records, periodStatus, canonical.workdayMtd);
   const statuses = getActiveStatusSalesmanFilter();
   const validation = validateDataset(records.filter(record => statuses.has(getEffectiveSalesmanStatus(record))), settings);
   if (!validation.totalEligible) throw new Error('Dataset snapshot aktif tidak memiliki baris eligible untuk dipublikasikan.');
@@ -7055,13 +7056,13 @@ function router() {
 function renderLegacySnapshotState() {
   const snapshot = State.activeSnapshot || {};
   return `<div class="empty-state"><div class="empty-state-icon">⚠️</div><h2>Struktur EC vs Call Total Lama</h2>
-    <p>Snapshot aktif masih menggunakan formula lama dan belum dapat dipakai untuk EC vs Call Total berbasis <strong>Effective Total Call / Day</strong>.</p>
+    <p>Snapshot aktif masih menggunakan formula lama dan belum dapat dipakai untuk EC vs Call Total berbasis <strong>TOTAL CALL ESUITE</strong>.</p>
     <div class="legacy-snapshot-info" style="display:inline-grid;gap:6px;text-align:left;background:#fff;border:1px solid var(--card-border);border-radius:10px;padding:12px 16px;margin:6px 0 16px;min-width:320px;">
       <div><strong>File:</strong> ${escapeHtml(snapshot.fileName || '-')}</div>
       <div><strong>Tanggal Data:</strong> ${snapshot.cutoffDate ? fmtDateId(snapshot.cutoffDate) : '-'}</div>
       <div><strong>Revisi Data:</strong> ${snapshot.revisionNumber || 1}</div>
     </div>
-    <p>Upload file Excel baru yang memiliki kolom <strong>TOTAL CALL ESUITE</strong> atau <strong>TOTAL CALL/DAY</strong>, lalu tekan <strong>Simpan dan Gunakan Data</strong>.</p>
+    <p>Upload file Excel baru yang memiliki kolom <strong>TOTAL CALL ESUITE</strong>, lalu tekan <strong>Simpan dan Gunakan Data</strong>.</p>
     <button class="btn btn-primary" id="goto-upload-legacy-btn">Upload File Baru</button>
     <button class="btn btn-outline" id="goto-riwayat-legacy-btn" style="margin-left:8px;">Lihat Riwayat Upload</button></div>`;
 }
@@ -7233,7 +7234,7 @@ function openActiveDataPopover(button) {
       <div class="topbar-data-popover-label">Regional aktif</div><div class="topbar-data-popover-value">${escapeHtml(State.activeRegionFilters.size ? globalRegionFilterValues().join(', ') : 'Semua Regional')}</div>
       <div class="topbar-data-popover-label">Data valid</div><div class="topbar-data-popover-value">${fmtNumber(State.validation.totalEligible || 0)}</div>
       <div class="topbar-data-popover-label">Bermasalah</div><div class="topbar-data-popover-value">${fmtNumber(State.validation.totalNotEligible || 0)}</div>
-      <div class="topbar-data-popover-label">EC vs Call Total</div><div class="topbar-data-popover-value">Effective Total Call / Day</div>
+      <div class="topbar-data-popover-label">EC vs Call Total</div><div class="topbar-data-popover-value">TOTAL CALL ESUITE</div>
       <div class="topbar-data-popover-label">TAT MTD</div><div class="topbar-data-popover-value">${isValidTatMtdValue(snapshot.tatMtd) ? fmtPercent(snapshot.tatMtd) : '-'}</div>
       <div class="topbar-data-popover-label">Pembanding</div><div class="topbar-data-popover-value">${escapeHtml(comparisonSnapshotLabel())}</div>
     </div>
@@ -12126,7 +12127,6 @@ function renderUploadPreview() {
   }
 
   const resolved = up.resolution === 'none' ? up.parsed.rawRecords : resolveDuplicates(up.parsed.rawRecords, up.resolution).records;
-  applyEffectiveTotalCallContext(resolved, uploadPeriodStatusValue(), up.parsed.workdayMtd);
   const validation = validateDataset(resolved, previewSettings);
   const tatValidation = validateTatDataset(resolved);
   up.resolvedRecords = resolved; up.validation = validation; up.tatValidation = tatValidation;
@@ -12150,7 +12150,7 @@ function renderUploadPreview() {
   let keteranganKosongCount = 0;
   resolved.forEach(r => {
     const s = r.statusSalesmanSumber || 'MATCH'; statusCounts[s] = (statusCounts[s] || 0) + 1;
-    const callSource = r.effectiveTotalCallSource || EFFECTIVE_CALL_SOURCE_NONE;
+    const callSource = positiveFiniteCallNumber(r.totalCallEsuite) !== null ? EFFECTIVE_CALL_SOURCE_ESUITE : EFFECTIVE_CALL_SOURCE_NONE;
     effectiveCallSourceCounts[callSource] = (effectiveCallSourceCounts[callSource] || 0) + 1;
     if (r.keteranganKosong) keteranganKosongCount++;
   });
@@ -12221,8 +12221,8 @@ function renderUploadPreview() {
         <div class="v-item ${up.dupInfo.duplicateCodes.length ? 'warn' : 'ok'}">Duplikasi Kode Salesman terdeteksi: ${up.dupInfo.duplicateCodes.length}</div>
         <div class="v-item ${validation.totalNotEligible ? 'warn' : 'ok'}">Data tidak lengkap / nilai tidak valid / pembagi nol: ${validation.totalNotEligible}</div>
         ${isKpiActive('hitRate', previewSettings) ? `<div class="v-item ${effectiveCallSourceCounts.NONE < resolved.length ? 'ok' : 'warn'}">
-          Struktur EC vs Call Total: <strong>Effective Total Call / Day</strong>
-          <div class="v-detail">ESUITE: ${fmtNumber(effectiveCallSourceCounts.ESUITE)} • CALL TOTAL: ${fmtNumber(effectiveCallSourceCounts.CALL_TOTAL)} • NONE: ${fmtNumber(effectiveCallSourceCounts.NONE)} • Formula: AVG EC ÷ Effective Total Call / Day × 100%</div>
+          Struktur EC vs Call Total: <strong>TOTAL CALL ESUITE</strong>
+          <div class="v-detail">ESUITE: ${fmtNumber(effectiveCallSourceCounts.ESUITE)} • INVALID/MISSING: ${fmtNumber(effectiveCallSourceCounts.NONE)} • Formula: AVG EC ÷ TOTAL CALL ESUITE × 100%</div>
         </div>` : ''}
         <div class="v-item ${isValidWorkdayMtdValue(up.parsed.workdayMtd) ? 'ok' : 'warn'}">
           Hari Kerja (HK) MTD: <strong>${isValidWorkdayMtdValue(up.parsed.workdayMtd) ? `${fmtNumber(up.parsed.workdayMtd, 0)} HK` : 'Tidak valid'}</strong>
@@ -12323,7 +12323,6 @@ async function confirmSaveSnapshot() {
     ? up.parsed.rawRecords
     : (['first', 'last'].includes(up.resolution) ? resolveDuplicates(up.parsed.rawRecords, up.resolution).records : []);
   up.resolvedRecords = resolvedRecords;
-  applyEffectiveTotalCallContext(resolvedRecords, periodStatus, up.parsed.workdayMtd);
   up.validation = validateDataset(resolvedRecords, periodKpiSettings);
   up.tatValidation = validateTatDataset(resolvedRecords);
   up.preflight = buildUploadPreflight(periodKey, periodStatus, up, periodKpiSettings, up.validation, up.tatValidation);
@@ -12359,7 +12358,7 @@ async function confirmSaveSnapshot() {
       workbookCutoffSourceCell: up.parsed.cutoffSourceCell || null,
       dataSchemaVersion: APP_CONFIG.CURRENT_DATA_SCHEMA_VERSION,
       hitRateSourceKey: APP_CONFIG.CURRENT_HIT_RATE_SOURCE,
-      hitRateSourceHeader: 'TOTAL CALL ESUITE | TOTAL CALL/DAY',
+      hitRateSourceHeader: 'TOTAL CALL ESUITE',
       hitRateFormulaVersion: APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION,
       tatMtd: up.tatValidation.tatMtd,
       tatSourceKey: APP_CONFIG.CURRENT_TAT_SOURCE,
@@ -12390,8 +12389,8 @@ async function confirmSaveSnapshot() {
     let snapshotCommitted = false;
     showLoadingOverlay('Menyimpan dan mengaktifkan data terbaru...');
     try {
-      const hasEffectiveCallSourceField = ['totalCallEsuite', 'totalCallDay'].some(key => !up.parsed.notFound.includes(key));
-      if (isKpiActive('hitRate', periodKpiSettings) && !hasEffectiveCallSourceField) throw new Error('Kolom TOTAL CALL ESUITE atau TOTAL CALL/DAY tidak ditemukan pada file yang dipilih.');
+      const hasTotalCallEsuiteField = !up.parsed.notFound.includes('totalCallEsuite');
+      if (isKpiActive('hitRate', periodKpiSettings) && !hasTotalCallEsuiteField) throw new Error('Kolom TOTAL CALL ESUITE tidak ditemukan pada file yang dipilih.');
 
       await Storage.saveAndActivateSnapshot(snapshot);
       snapshotCommitted = true;
@@ -12489,7 +12488,7 @@ function renderRiwayatTable() {
       { key: 'totalEligible', label: 'Data Valid', align: 'right', sortable: true, render: r => fmtNumber(r.totalEligible) },
       { key: 'totalNotEligible', label: 'Data Bermasalah', align: 'right', sortable: true, render: r => fmtNumber(r.totalNotEligible) },
       { key: 'revisionNumber', label: 'Revisi Data', align: 'right', sortable: true, render: r => r.revisionNumber || 1 },
-      { key: 'dataSchemaVersion', label: 'Struktur EC vs Call', sortable: true, render: r => isLegacyHitRateSnapshot(r) ? '<span class="badge cat-critical">Formula Lama</span>' : '<span class="badge cat-perfect">Effective Call/Day</span>' },
+      { key: 'dataSchemaVersion', label: 'Struktur EC vs Call', sortable: true, render: r => isLegacyHitRateSnapshot(r) ? '<span class="badge cat-critical">Formula Lama</span>' : '<span class="badge cat-perfect">AVG EC ÷ TOTAL CALL ESUITE</span>' },
       { key: 'tatFormulaVersion', label: 'Formula TAT', sortable: true, render: r => isLegacyTatSnapshot(r) ? '<span class="badge cat-needimprove">Legacy</span>' : `<span class="badge cat-perfect">${fmtPercent(r.tatMtd)}</span>` },
       // Periode + Jenis ditampilkan agar Admin dapat membedakan MTD dan Closing pada bulan yang sama.
       { key: 'periodKey', label: 'Periode', sortable: true, render: r => escapeHtml(periodMonthLabel(snapshotPeriodKeyForRevision(r))) },
@@ -12545,7 +12544,7 @@ function renderRiwayatTable() {
       await loadSnapshotIntoState(active);
       hideLoadingOverlay();
       renderSidebar();
-      showToast(isLegacyHitRateSnapshot(active) ? 'Snapshot formula lama diaktifkan. Upload ulang data untuk EC vs Call Total berbasis Effective Total Call / Day.' : 'Data berhasil digunakan.', isLegacyHitRateSnapshot(active) ? 'info' : 'success');
+      showToast(isLegacyHitRateSnapshot(active) ? 'Snapshot formula lama diaktifkan. Upload ulang data untuk EC vs Call Total berbasis TOTAL CALL ESUITE.' : 'Data berhasil digunakan.', isLegacyHitRateSnapshot(active) ? 'info' : 'success');
       navigate(isLegacyHitRateSnapshot(active) ? '/upload' : '/dashboard');
     } else if (e.target.classList.contains('act-view')) {
       const snap = await Storage.getSnapshot(id);
@@ -13114,7 +13113,7 @@ async function applyGlobalScopeFilters({ phases, regions }) {
   router();
 }
 
-// Snapshot Hit Rate lama dibedakan dari formula aktif Effective Total Call / Day.
+// Snapshot Hit Rate lama dibedakan dari formula aktif TOTAL CALL ESUITE.
 // Snapshot baru wajib membawa metadata formula dan field denominator efektif per record.
 function snapshotHasEffectiveTotalCallDay(snapshot) {
   const records = Array.isArray(snapshot && snapshot.rawRecords) ? snapshot.rawRecords : [];
@@ -13129,7 +13128,7 @@ function isLegacyHitRateSnapshot(snapshot) {
   const hasExplicitFormulaMetadata = !!sourceKey || !!formulaVersion;
   const sourceIsCurrent = sourceKey === APP_CONFIG.CURRENT_HIT_RATE_SOURCE;
   const formulaIsCurrent = formulaVersion === APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION;
-  if (sourceIsCurrent && formulaIsCurrent) return !snapshotHasEffectiveTotalCallDay(snapshot);
+  if (sourceIsCurrent && formulaIsCurrent) return false;
   if (hasExplicitFormulaMetadata) return true;
   return !snapshotHasEffectiveTotalCallDay(snapshot);
 }
@@ -13147,21 +13146,25 @@ function resolveSnapshotFormulaModel(snapshot) {
   if (!snapshot) {
     return Object.freeze({
       hitRateFormulaVersion: APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION,
-      hitRateMode: 'effective_total_call_day',
+      hitRateMode: 'total_call_esuite_ratio',
+      hitRateAggregationMode: 'mean_salesman_percent',
       tatFormulaVersion: APP_CONFIG.CURRENT_TAT_FORMULA_VERSION,
       tatScoringMode: 'achievement_div_tat',
-      signature: `hit:${APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION}|tat:${APP_CONFIG.CURRENT_TAT_FORMULA_VERSION}`
+      signature: `hit:${APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION}|hitAgg:mean_salesman_percent|tat:${APP_CONFIG.CURRENT_TAT_FORMULA_VERSION}`
     });
   }
   const hitRateFormulaVersion = hitRateScoreModel(snapshot);
   const tatFormulaVersion = tatScoreModel(snapshot);
   const hitRateMode = hitRateFormulaVersion === APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION
-    ? 'effective_total_call_day' : 'legacy_total_call_esuite';
+    ? 'total_call_esuite_ratio'
+    : (String(snapshot.hitRateSourceKey || '') === 'effectiveTotalCallDay' ? 'effective_total_call_day' : 'legacy_total_call_esuite');
+  const hitRateAggregationMode = hitRateFormulaVersion === APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION
+    ? 'mean_salesman_percent' : 'ratio_of_sums';
   const tatScoringMode = tatFormulaVersion === APP_CONFIG.CURRENT_TAT_FORMULA_VERSION
     ? 'achievement_div_tat' : 'legacy_achievement';
   return Object.freeze({
-    hitRateFormulaVersion, hitRateMode, tatFormulaVersion, tatScoringMode,
-    signature: `hit:${hitRateFormulaVersion}|tat:${tatFormulaVersion}`
+    hitRateFormulaVersion, hitRateMode, hitRateAggregationMode, tatFormulaVersion, tatScoringMode,
+    signature: `hit:${hitRateFormulaVersion}|hitAgg:${hitRateAggregationMode}|tat:${tatFormulaVersion}`
   });
 }
 function withSnapshotFormulaModel(settings, snapshot) {
@@ -13299,7 +13302,8 @@ function createDemoRecords(periodKey, periodIndex, callContext = {}) {
       namaSalesman: originalName, keterangan,
       cb: 100, cbEsuite: 100, roa: roaPct, pctAchMtdRoaCb: roaPct,
       tgtScJks: 100, achScVsJks: scPct, pctAchScVsJks: scPct,
-      totalCallDay: call * rawCallMultiplier, totalCallEsuite: call * rawCallMultiplier,
+      // Current BB/W memakai W pada skala langsung; hanya field compatibility TOTAL CALL/DAY yang tetap mengikuti skala lama.
+      totalCallDay: call * rawCallMultiplier, totalCallEsuite: call,
       geofencing: scPct * geoPct / 100, pctAchGeofencing: geoPct,
       tgtOmsFm: revenueTarget, mtdOmsFm: revenueTarget * revPct / 100, pctAchRevenue: revPct,
       tatMtd: tat, avgEc,
