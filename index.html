@@ -118,7 +118,7 @@ body{margin:0;font-family:var(--font);background:var(--bg);color:var(--ink);min-
 #main-col{flex:1;display:flex;flex-direction:column;min-width:0;}
 #topbar{
   background:var(--card);border-bottom:1px solid var(--card-border);
-  padding:12px 26px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;position:sticky;top:0;z-index:50;
+  padding:12px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:sticky;top:0;z-index:50;
 }
 /* Judul halaman + breadcrumb utama DIHAPUS dari seluruh menu (lihat renderTopbar).
    Breadcrumb modal drill-down memakai class .drilldown-breadcrumbs dan tidak terpengaruh. */
@@ -166,11 +166,17 @@ body{margin:0;font-family:var(--font);background:var(--bg);color:var(--ink);min-
 /* Kompak agar desktop 1366px ke atas muat satu baris. Teks panjang dipotong ellipsis
    (title attribute tetap membawa teks penuh), BUKAN memaksa horizontal scroll. */
 .topbar-controls-row .btn-sm{padding:0 9px;font-size:12px;}
+/* Label prefix Topbar disembunyikan secara visual tapi TETAP terbaca screen reader
+   (accessible name <label for> dipertahankan; konteks penuh ada di title/aria-label). */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0;}
 .topbar-controls-row .topbar-period-label{font-size:11.5px;}
 .topbar-controls-row .topbar-period-select{max-width:190px;font-size:12px;}
 .topbar-controls-row .topbar-global-filter-btn,
 .topbar-controls-row .topbar-status-btn{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.topbar-controls-row .topbar-data-summary{min-height:30px;font-size:11.5px;}
+.topbar-controls-row .topbar-data-summary{min-height:30px;font-size:11.5px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* Chip Data (khusus Dashboard) dipangkas hanya saat ruang benar-benar menipis;
+   teks penuh tetap ada di title dan pada popover detail saat diklik. */
+@media (max-width:1400px){.topbar-controls-row .topbar-data-summary{max-width:240px;}}
 .topbar-controls-row .runtime-badge{font-size:11px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 /* Pemangkasan label hanya dilakukan saat ruang benar-benar menipis, supaya teks tidak
    terpotong sia-sia pada desktop lebar. Teks penuh tetap tersedia via title attribute. */
@@ -2868,6 +2874,13 @@ function periodOptionLabel(periodKey, periodStatus) {
   const month = periodMonthLabel(periodKey);
   const status = periodStatusLabel(periodStatus);
   return status ? `${month} — ${status}` : month;
+}
+// Versi ringkas KHUSUS tampilan Topbar: 'Sep 2026 · MTD'. periodKey internal, period logic,
+// dan periodOptionLabel() (dipakai toast/dialog/popover/Trend) TIDAK berubah.
+function periodOptionShortLabel(periodKey, periodStatus) {
+  const month = compactMonthYearLabel(periodKey) || periodMonthLabel(periodKey);
+  const status = periodStatusLabel(periodStatus);
+  return status ? `${month} · ${status}` : month;
 }
 // Status periode sebuah snapshot. Snapshot legacy tanpa metadata periode diperlakukan
 // sebagai MTD (fallback konservatif, sama seperti backfill database).
@@ -7698,9 +7711,9 @@ function periodSelectorHtml() {
     const activeKey = snapshotPeriodKey(State.activeSnapshot) || localOptions[0].periodKey;
     const disabled = State.periodBusy ? ' disabled' : '';
     return `<div class="topbar-period-filter">
-      <label class="topbar-period-label" for="topbar-period-select">Periode:</label>
-      <select class="topbar-period-select" id="topbar-period-select" title="Periode workspace lokal Admin — revisi data lokal terbaru per bulan"${disabled}>
-        ${localOptions.map(option => `<option value="${escapeHtml(option.periodKey)}"${option.periodKey === activeKey ? ' selected' : ''}>${escapeHtml(periodOptionLabel(option.periodKey, option.periodStatus))}</option>`).join('')}
+      <label class="topbar-period-label sr-only" for="topbar-period-select">Periode</label>
+      <select class="topbar-period-select" id="topbar-period-select" aria-label="Periode data" title="Periode: ${escapeHtml(periodOptionLabel(activeKey, (localOptions.find(o => o.periodKey === activeKey) || {}).periodStatus))} — workspace lokal Admin, revisi data lokal terbaru per bulan"${disabled}>
+        ${localOptions.map(option => `<option value="${escapeHtml(option.periodKey)}"${option.periodKey === activeKey ? ' selected' : ''}>${escapeHtml(periodOptionShortLabel(option.periodKey, option.periodStatus))}</option>`).join('')}
       </select>
     </div>`;
   }
@@ -7718,9 +7731,9 @@ function periodSelectorHtml() {
   if (!options.length) return '';
   const disabled = State.periodBusy ? ' disabled' : '';
   return `<div class="topbar-period-filter">
-    <label class="topbar-period-label" for="topbar-period-select">Periode:</label>
-    <select class="topbar-period-select" id="topbar-period-select" title="Satu bulan = satu dataset resmi"${disabled}>
-      ${options.map(option => `<option value="${escapeHtml(option.periodKey)}"${option.periodKey === activeKey ? ' selected' : ''}>${escapeHtml(periodOptionLabel(option.periodKey, option.periodStatus))}</option>`).join('')}
+    <label class="topbar-period-label sr-only" for="topbar-period-select">Periode</label>
+    <select class="topbar-period-select" id="topbar-period-select" aria-label="Periode data" title="Periode: ${escapeHtml(periodOptionLabel(activeKey, (options.find(o => o.periodKey === activeKey) || {}).periodStatus))} — satu bulan = satu dataset resmi"${disabled}>
+      ${options.map(option => `<option value="${escapeHtml(option.periodKey)}"${option.periodKey === activeKey ? ' selected' : ''}>${escapeHtml(periodOptionShortLabel(option.periodKey, option.periodStatus))}</option>`).join('')}
     </select>
   </div>`;
 }
@@ -7746,27 +7759,27 @@ function renderTopbar(path, params) {
     <div class="topbar-controls">
     <div class="topbar-controls-row topbar-controls-row-single">
     ${periodSelectorHtml()}
-    ${dataSummary ? `<button type="button" class="topbar-data-summary" id="topbar-data-summary" aria-expanded="false"><span class="dot"></span>${escapeHtml(dataSummary)}</button>` : ''}
+    ${dataSummary ? `<button type="button" class="topbar-data-summary" id="topbar-data-summary" aria-expanded="false" title="${escapeHtml(dataSummary)}" aria-label="${escapeHtml(dataSummary)}"><span class="dot"></span>${escapeHtml(dataSummary)}</button>` : ''}
     ${showPhaseFilter ? `
       <div class="topbar-phase-filter">
-        <button type="button" class="btn btn-outline btn-sm topbar-global-filter-btn" id="topbar-phase-btn" aria-expanded="false" aria-haspopup="dialog" title="Filter global Phase (boleh lebih dari satu)">Phase: ${escapeHtml(globalPhaseFilterLabel())} ▾</button>
+        <button type="button" class="btn btn-outline btn-sm topbar-global-filter-btn" id="topbar-phase-btn" aria-expanded="false" aria-haspopup="dialog" aria-label="Filter Phase: ${escapeHtml(globalPhaseFilterLabel())}" title="Filter Phase: ${escapeHtml(globalPhaseFilterLabel())} (boleh lebih dari satu)">${escapeHtml(globalPhaseFilterLabel())} ▾</button>
       </div>` : ''}
     ${showRegionFilter ? `
       <div class="topbar-phase-filter">
-        <button type="button" class="btn btn-outline btn-sm topbar-global-filter-btn" id="topbar-region-btn" aria-expanded="false" aria-haspopup="dialog" title="Filter global Regional (boleh lebih dari satu)">Regional: ${escapeHtml(globalRegionFilterLabel())} ▾</button>
+        <button type="button" class="btn btn-outline btn-sm topbar-global-filter-btn" id="topbar-region-btn" aria-expanded="false" aria-haspopup="dialog" aria-label="Filter Regional: ${escapeHtml(globalRegionFilterLabel())}" title="Filter Regional: ${escapeHtml(globalRegionFilterLabel())} (boleh lebih dari satu)">${escapeHtml(globalRegionFilterLabel())} ▾</button>
       </div>` : ''}
     ${showStatusFilter ? `
       <div class="topbar-phase-filter">
-        <button type="button" class="btn btn-outline btn-sm topbar-status-btn" id="topbar-status-btn" title="Filter global Status Salesman: ${escapeHtml(statusSalesmanFilterLabel())}">Status Salesman: ${escapeHtml(statusSalesmanFilterLabel())} ▾</button>
+        <button type="button" class="btn btn-outline btn-sm topbar-status-btn" id="topbar-status-btn" aria-label="Status Salesman: ${escapeHtml(statusSalesmanFilterLabel())}" title="Status Salesman: ${escapeHtml(statusSalesmanFilterLabel())}">${escapeHtml(statusSalesmanFilterLabel())} ▾</button>
       </div>` : ''}
     <div class="topbar-auth-actions">
-      <span class="runtime-badge ${State.isLocalDemo ? 'demo' : (State.isAdmin ? 'admin' : (State.remoteSource === 'cache' ? 'cache' : 'viewer'))}"><span class="dot"></span>${State.isLocalDemo ? '🧪 MODE DEMO LOKAL · ADMIN DEMO' : (State.isAdmin ? 'Mode Admin' : (State.remoteSource === 'cache' ? 'Viewer · Cache' : 'Mode Viewer'))}</span>
+      <span class="runtime-badge ${State.isLocalDemo ? 'demo' : (State.isAdmin ? 'admin' : (State.remoteSource === 'cache' ? 'cache' : 'viewer'))}" title="${State.isLocalDemo ? 'Mode Demo Lokal · Admin Demo' : (State.isAdmin ? 'Mode Admin' : (State.remoteSource === 'cache' ? 'Mode Viewer · sumber Cache Viewer' : 'Mode Viewer'))}" aria-label="${State.isLocalDemo ? 'Mode Demo Lokal, Admin Demo' : (State.isAdmin ? 'Mode Admin' : (State.remoteSource === 'cache' ? 'Mode Viewer, sumber Cache' : 'Mode Viewer'))}"><span class="dot"></span>${State.isLocalDemo ? '🧪 Demo' : (State.isAdmin ? 'Admin' : (State.remoteSource === 'cache' ? 'Cache' : 'Viewer'))}</span>
       ${State.isAdmin ? `
         ${State.isLocalDemo ? '' : '<button class="btn btn-outline btn-sm" id="topbar-publication-history-btn">Riwayat Publikasi</button>'}
         ${!State.isLocalDemo && State.activeSnapshot && State.validation ? '<button class="btn btn-primary btn-sm" id="topbar-publish-btn">Publikasikan Data Nasional</button>' : ''}
         ${State.isLocalDemo ? '' : '<button class="btn btn-primary btn-sm" id="topbar-upload-btn">⬆ Upload Data</button><button class="btn btn-ghost btn-sm" id="topbar-logout-btn">Logout</button>'}
       ` : `
-        ${State.supabaseReady ? '<button class="btn btn-outline btn-sm" id="topbar-refresh-btn">Perbarui Data</button>' : ''}
+        ${State.supabaseReady ? '<button class="btn btn-outline btn-sm" id="topbar-refresh-btn" title="Perbarui Data" aria-label="Perbarui Data">↻ Perbarui</button>' : ''}
         <button class="btn btn-ghost btn-sm" id="topbar-login-btn">Login Admin</button>
       `}
     </div>
