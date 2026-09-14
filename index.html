@@ -1409,7 +1409,7 @@ const APP_CONFIG = {
       info: '≥90% Perfect, 85-89.99% Good, <85% Perlu Ditingkatkan.',
       categoryFn: (v) => v >= 90 ? { label: 'Perfect', cls: 'cat-perfect' } : v >= 85 ? { label: 'Good', cls: 'cat-good' } : { label: 'Perlu Ditingkatkan', cls: 'cat-bad' } },
     { id: 'hitRate', label: 'EC vs Call Total', group: 'productivity', groupLabel: 'Productivity', defaultWeight: 10,
-      formula: 'AVG EC ÷ Effective Total Call / Day × 100%', computeSalesman: (r) => { const ratio = safeDivide(r.avgEc, hitRateDenominatorForRecord(r)); return ratio === null ? null : ratio * 100; },
+      formula: 'AVG EC ÷ Effective Total Call / Day × 100%', computeSalesman: (r, _avgEcTarget, formulaModel) => { const ratio = safeDivide(r.avgEc, hitRateDenominatorForRecord(r, formulaModel)); return ratio === null ? null : ratio * 100; },
       numeratorField: 'avgEc', denominatorField: null,
       alternativeRequiredGroups: [['totalCallEsuite', 'totalCallDay']],
       info: '100% Perfect, 80-99.99% Sangat Bagus, 70-79.99% Good, <70% Perlu Ditingkatkan.',
@@ -1562,7 +1562,10 @@ function resolvedKpiSettings(periodKey, context = {}) {
 function currentKpiSettings() {
   const key = snapshotPeriodKey(State.activeSnapshot) || normalizePeriodKeyValue(State.activePeriodKey);
   const immutable = snapshotImmutableKpiConfiguration(State.activeSnapshot);
-  return resolvedKpiSettings(key, { settings: State.settings || defaultSettings(), immutableConfiguration: immutable || null });
+  return withSnapshotFormulaModel(
+    resolvedKpiSettings(key, { settings: State.settings || defaultSettings(), immutableConfiguration: immutable || null }),
+    State.activeSnapshot
+  );
 }
 // Hanya snapshot yang benar-benar berasal dari payload publikasi resmi yang immutable.
 // Snapshot lokal/unpublished (termasuk snapshot legacy yang pernah menyimpan config saat upload)
@@ -1679,11 +1682,12 @@ function globalScopeFingerprint() {
 }
 function settingsFingerprint(settings) {
   const snapshot = State.activeSnapshot;
-  const tatPart = snapshot ? `${snapshot.tatMtd ?? ''}|${snapshot.tatFormulaVersion || ''}` : '';
   const effective = settings && settings.__kpiConfiguration ? settings : currentKpiSettings();
   const configPart = effective.__kpiConfiguration ? effective.__kpiConfiguration.signature : kpiConfigurationSignature(effective);
-  const hitRatePart = snapshot ? hitRateScoreModel(snapshot) : APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION;
-  return configPart + '|cohorts:' + JSON.stringify((settings && settings.cohorts) || []) + '|tat:' + tatPart + '|hit:' + hitRatePart + '|' + globalScopeFingerprint();
+  const formulaModel = formulaModelForSettings(effective);
+  const tatValuePart = snapshot ? (snapshot.tatMtd ?? '') : '';
+  return configPart + '|cohorts:' + JSON.stringify((settings && settings.cohorts) || [])
+    + '|formula:' + formulaModel.signature + '|tatValue:' + tatValuePart + '|' + globalScopeFingerprint();
 }
 // O: fingerprint KHUSUS untuk cache hierarchy (Detail KPI scoped & Ranking Phase). Mencakup seluruh input yang
 // benar-benar memengaruhi hasil agregasi: settings KPI, Status Salesman aktif, Phase, Master Cabang, VACANT,
@@ -2594,8 +2598,16 @@ function applyEffectiveTotalCallContext(records, periodStatus, workdayMtd) {
 }
 // Record v2 selalu memiliki properti effectiveTotalCallDay (termasuk null). Record historis v1 tidak
 // memilikinya dan tetap memakai denominator resmi lamanya, sehingga published history tidak dihitung ulang.
-function hitRateDenominatorForRecord(record) {
+function hitRateDenominatorForRecord(record, formulaModel) {
   if (!record) return null;
+  const model = formulaModel && formulaModel.hitRateMode ? formulaModel : null;
+  if (model && model.hitRateMode === 'legacy_total_call_esuite') return positiveFiniteCallNumber(record.totalCallEsuite);
+  if (model && model.hitRateMode === 'effective_total_call_day') {
+    return Object.prototype.hasOwnProperty.call(record, 'effectiveTotalCallDay')
+      ? positiveFiniteCallNumber(record.effectiveTotalCallDay) : null;
+  }
+  // Backward-compatible fallback untuk caller non-reconstruction: core validation,
+  // hierarchy, Trend, dan comparison selalu mengirim model explicit.
   if (Object.prototype.hasOwnProperty.call(record, 'effectiveTotalCallDay')) return positiveFiniteCallNumber(record.effectiveTotalCallDay);
   return positiveFiniteCallNumber(record.totalCallEsuite);
 }
@@ -2913,7 +2925,9 @@ function parseExcelWorkbook(arrayBuffer, options = {}) {
     throw new ParseError(`Header "Kode Salesman" tidak ditemukan pada sheet "${sheetName}". Pastikan struktur file sesuai template.`);
   }
   const parserPeriodKey = detectedPeriodKey || requestedPeriodKey;
-  const settings = options.settings || resolvedKpiSettings(parserPeriodKey, { settings: State.settings });
+  // Workbook upload selalu dataset baru. Formula context-nya CURRENT dan tidak boleh
+  // ikut snapshot yang kebetulan sedang aktif di UI.
+  const settings = options.settings || withCurrentFormulaModel(resolvedKpiSettings(parserPeriodKey, { settings: State.settings }));
   const mapping = buildColumnIndexMap(rows, headerRowIdx, settings);
   const { colIndexMap, matchedByName, notFound, fallbackUsed, sourceRequirements } = mapping;
   // Header identitas yang dipakai row validation wajib benar-benar ditemukan berdasarkan nama.
@@ -3011,7 +3025,7 @@ function validateRow(rec, settings = currentKpiSettings()) {
   if (active.roaCb && (rec.roa === null || isNaN(rec.roa))) reasons.push({ field: 'roa', message: 'ROA bukan angka valid', value: rec.roa });
   // Validasi memakai hasil resolver yang sama dengan scoring/agregasi. Record historis v1 yang belum
   // memiliki field effective tetap divalidasi memakai denominator resmi versi lamanya.
-  if (active.hitRate && hitRateDenominatorForRecord(rec) === null) {
+  if (active.hitRate && hitRateDenominatorForRecord(rec, formulaModelForSettings(settings)) === null) {
     reasons.push({ field: 'effectiveTotalCallDay', message: 'Effective Total Call / Day tidak valid', value: rec.effectiveTotalCallDay });
   }
   if ((active.hitRate || active.avgEcAch) && (rec.avgEc === null || isNaN(rec.avgEc))) reasons.push({ field: 'avgEc', message: 'AVG EC (EPD MTD) bukan angka valid', value: rec.avgEc });
@@ -3117,7 +3131,7 @@ function validateDataset(records, settings = currentKpiSettings()) {
    KPI ENGINE  &  SCORE ENGINE
    ============================================================ */
 function calculateKpiForSalesman(kpiDef, rec, settings) {
-  if (kpiDef.computeSalesman) return kpiDef.computeSalesman(rec, settings.avgEcTarget);
+  if (kpiDef.computeSalesman) return kpiDef.computeSalesman(rec, settings.avgEcTarget, formulaModelForSettings(settings));
   const provided = rec[kpiDef.salesmanField];
   if (provided !== null && provided !== undefined && !isNaN(provided)) return provided;
   if (kpiDef.numeratorField && kpiDef.denominatorField) {
@@ -3128,9 +3142,11 @@ function calculateKpiForSalesman(kpiDef, rec, settings) {
 }
 const TAT_ADJUSTED_KPI_IDS = new Set(['roaCb', 'revenue', 'strata2']);
 function isTatAdjustedKpi(kpiId) { return TAT_ADJUSTED_KPI_IDS.has(kpiId); }
-function kpiScoreBasis(kpiId, actual, tatMtd) {
+function kpiScoreBasis(kpiId, actual, tatMtd, formulaModel) {
   if (actual === null || actual === undefined || !Number.isFinite(Number(actual))) return null;
-  if (!isTatAdjustedKpi(kpiId) || !isValidTatMtdValue(tatMtd)) return Number(actual); // fallback snapshot legacy
+  const model = formulaModel && formulaModel.tatScoringMode ? formulaModel : formulaModelForSettings(null);
+  if (!isTatAdjustedKpi(kpiId) || model.tatScoringMode !== 'achievement_div_tat'
+      || !isValidTatMtdValue(tatMtd)) return Number(actual);
   const ratio = safeDivide(Number(actual), Number(tatMtd));
   return ratio === null ? Number(actual) : ratio * 100;
 }
@@ -3138,12 +3154,13 @@ function capScore(actual, cap) { if (actual === null || actual === undefined || 
 
 function calculateSalesmanKpis(rec, settings) {
   const cap = settings.scoreCap, weights = settings.weights;
+  const formulaModel = formulaModelForSettings(settings);
   const kpiResults = {};
   const tatMtd = isValidTatMtdValue(rec && rec.tatMtd) ? Number(rec.tatMtd) : null;
   APP_CONFIG.KPI_DEFS.forEach(def => {
     if (!isKpiActive(def.id, settings)) return;
     const actual = calculateKpiForSalesman(def, rec, settings);
-    const scoreBasis = kpiScoreBasis(def.id, actual, tatMtd);
+    const scoreBasis = kpiScoreBasis(def.id, actual, tatMtd, formulaModel);
     const score = capScore(scoreBasis, cap);
     const weight = weights[def.id] || 0;
     const contribution = score === null ? 0 : (score * weight) / 100;
@@ -3177,6 +3194,7 @@ function calculateGroupScores(kpiResults, weights) {
    AGGREGATION ENGINE
    ============================================================ */
 function aggregateByGroup(eligibleRecords, allRecords, keyFn, metaFn, settings) {
+  const formulaModel = formulaModelForSettings(settings);
   const groups = new Map();
   const ensureGroup = (rec) => {
     const key = keyFn(rec);
@@ -3197,7 +3215,7 @@ function aggregateByGroup(eligibleRecords, allRecords, keyFn, metaFn, settings) 
     s.achScVsJks += num(rec.achScVsJks); s.tgtScJks += num(rec.tgtScJks);
     s.geofencing += num(rec.geofencing); s.roa += num(rec.roa); s.cb += num(rec.cb);
     s.avgEc += num(rec.avgEc); s.totalCallDay += num(rec.totalCallDay); s.totalCallEsuite += num(rec.totalCallEsuite);
-    s.effectiveTotalCallDay += num(hitRateDenominatorForRecord(rec));
+    s.effectiveTotalCallDay += num(hitRateDenominatorForRecord(rec, formulaModel));
     s.mtdOmsFm += num(rec.mtdOmsFm); s.tgtOmsFm += num(rec.tgtOmsFm);
     s.achEpbPoinRoa += num(rec.achEpbPoinRoa); s.tgtEpbStrata2 += num(rec.tgtEpbStrata2);
   });
@@ -3210,6 +3228,7 @@ function pctv(v) { return v === null ? null : v * 100; }
 
 function computeGroupKpisAndScore(g, settings) {
   const s = g.sums, cap = settings.scoreCap, weights = settings.weights, eligibleCount = g.eligibleSalesman;
+  const formulaModel = formulaModelForSettings(settings);
   const actuals = {
     scJks: pctv(safeDivide(s.achScVsJks, s.tgtScJks)),
     geofencing: pctv(safeDivide(s.geofencing, s.achScVsJks)),
@@ -3223,7 +3242,7 @@ function computeGroupKpisAndScore(g, settings) {
   const kpiResults = {};
   APP_CONFIG.KPI_DEFS.forEach(def => {
     if (!isKpiActive(def.id, settings)) return;
-    const actual = actuals[def.id], scoreBasis = kpiScoreBasis(def.id, actual, g.tatMtd), score = capScore(scoreBasis, cap), weight = weights[def.id] || 0;
+    const actual = actuals[def.id], scoreBasis = kpiScoreBasis(def.id, actual, g.tatMtd, formulaModel), score = capScore(scoreBasis, cap), weight = weights[def.id] || 0;
     const contribution = score === null ? 0 : (score * weight) / 100;
     kpiResults[def.id] = { id: def.id, label: def.label, group: def.group, actual, tat: isTatAdjustedKpi(def.id) ? g.tatMtd : null, scoreBasis, score, weight, contribution, category: def.categoryFn && scoreBasis !== null ? def.categoryFn(scoreBasis) : null };
   });
@@ -3419,6 +3438,22 @@ function areSnapshotFormulasCompatible(a, b) {
   return tatScoreModel(a) === tatScoreModel(b) && hitRateScoreModel(a) === hitRateScoreModel(b);
 }
 
+// Snapshot remote/cache hanya mendapat marker ini lewat hydratePublishedPayload().
+// Marker tidak berasal dari file upload lokal, sehingga compatibility historis
+// tidak dapat dipakai untuk melewati validasi dataset baru atau transient Admin.
+function isOfficialPublishedSnapshot(snapshot) {
+  return !!snapshot && snapshot.__officialPublished === true;
+}
+function isLegacyOfficialSnapshot(snapshot) {
+  return isOfficialPublishedSnapshot(snapshot) && isLegacyHitRateSnapshot(snapshot);
+}
+function canCompareOfficialSnapshotsAcrossFormulaVersions(a, b) {
+  if (!isOfficialPublishedSnapshot(a) || !isOfficialPublishedSnapshot(b)) return false;
+  if (!isLegacyHitRateSnapshot(a) && !isLegacyHitRateSnapshot(b)) return false;
+  return Array.isArray(a.rawRecords) && a.rawRecords.length > 0
+    && Array.isArray(b.rawRecords) && b.rawRecords.length > 0;
+}
+
 function selectPreviousComparisonSnapshot(activeSnapshot) {
   if (!activeSnapshot) return null;
   const activeDate = snapshotDateValue(activeSnapshot);
@@ -3427,7 +3462,10 @@ function selectPreviousComparisonSnapshot(activeSnapshot) {
   const snapshots = Array.isArray(State.snapshotList) ? State.snapshotList : [];
   snapshots.forEach(prepareLocalEffectiveTotalCallSnapshot);
   const candidates = snapshots.filter(snapshot => {
-    if (!snapshot || snapshot.id === activeSnapshot.id || isLegacyHitRateSnapshot(snapshot) || !areSnapshotFormulasCompatible(activeSnapshot, snapshot)) return false;
+    if (!snapshot || snapshot.id === activeSnapshot.id) return false;
+    const formulasCompatible = areSnapshotFormulasCompatible(activeSnapshot, snapshot)
+      || canCompareOfficialSnapshotsAcrossFormulaVersions(activeSnapshot, snapshot);
+    if (!formulasCompatible) return false;
     const candidateDate = snapshotDateValue(snapshot);
     if (!Number.isFinite(candidateDate)) return false;
     if (candidateDate < activeDate) return true;
@@ -3466,12 +3504,18 @@ function rebuildComparisonContext() {
   }
   try {
     const previousPeriodKey = snapshotPeriodKey(previousSnapshot);
-    const previousSettings = resolvedKpiSettings(previousPeriodKey, {
+    const previousSettings = withSnapshotFormulaModel(resolvedKpiSettings(previousPeriodKey, {
       settings: State.settings,
       immutableConfiguration: snapshotImmutableKpiConfiguration(previousSnapshot)
-    });
+    }), previousSnapshot);
     const validation = validateDataset(recordsForSnapshotScope(previousSnapshot), previousSettings);
     const previousHierarchy = buildHierarchy(validation, previousSettings);
+    if (!validation.totalEligible || !previousHierarchy || !previousHierarchy.national
+        || previousHierarchy.national.finalScore === null
+        || previousHierarchy.national.finalScore === undefined
+        || !Number.isFinite(Number(previousHierarchy.national.finalScore))) {
+      throw new Error('Snapshot pembanding official tidak memiliki hasil ranking yang dapat ditampilkan.');
+    }
     State.comparison = { previousSnapshot, previousHierarchy };
   } catch (error) {
     console.error('Gagal menyiapkan snapshot pembanding:', error);
@@ -5623,7 +5667,10 @@ function createPublishScopedSnapshot(snapshot, regionKeySet) {
   if (!canonical) return null;
   const publicRecords = canonical.rawRecords.filter(record => recordInPublishScope(record, regionKeySet));
   const statuses = getActiveStatusSalesmanFilter();
-  const scopedSettings = resolvedKpiSettings(snapshotPeriodKey(canonical), { settings: State.settings, immutableConfiguration });
+  const scopedSettings = withSnapshotFormulaModel(
+    resolvedKpiSettings(snapshotPeriodKey(canonical), { settings: State.settings, immutableConfiguration }),
+    canonical
+  );
   const validation = validateDataset(publicRecords.filter(record => statuses.has(getEffectiveSalesmanStatus(record))), scopedSettings);
   return {
     ...canonical,
@@ -5847,7 +5894,10 @@ function buildPublishedPayloadForScope(regions, comparisonCandidate, publication
   // Revisi Publikasi WAJIB berasal dari database (lihat getNextPublicationRevision). Tanpa nilai valid,
   // payload tidak boleh dibangun — jangan pernah jatuh ke Source Revision.
   if (!isPositiveInteger(publicationRevisionNumber)) throw new Error('Revisi publikasi terbaru tidak dapat diperiksa.');
-  const effectiveSettings = resolvedKpiSettings(snapshotPeriodKey(State.activeSnapshot), { settings: State.settings });
+  const effectiveSettings = withSnapshotFormulaModel(
+    resolvedKpiSettings(snapshotPeriodKey(State.activeSnapshot), { settings: State.settings }),
+    State.activeSnapshot
+  );
   validateActiveSnapshotForPublication(State.activeSnapshot, effectiveSettings);
   const regionKeySet = toRegionKeySet(regions);
   if (!regionKeySet.size) throw new Error('Pilih minimal satu Regional untuk dipublikasikan.');
@@ -6011,7 +6061,12 @@ async function hydratePublishedPayload(payload, remoteMeta, source, cachedAt) {
   if (remoteMeta && remoteMeta.id) active.id = String(remoteMeta.id);
   const comparisonCandidate = payload.comparisonSnapshot ? canonicalSnapshot(payload.comparisonSnapshot) : null;
   if (comparisonCandidate) comparisonCandidate.__officialPublished = true;
-  const comparison = comparisonCandidate && areSnapshotFormulasCompatible(active, comparisonCandidate) ? comparisonCandidate : null;
+  // Official comparison boleh memakai formula historisnya sendiri. Dataset lokal
+  // tetap wajib formula-compatible dan tidak mendapat bypass ini.
+  const comparison = comparisonCandidate && (
+    areSnapshotFormulasCompatible(active, comparisonCandidate)
+    || canCompareOfficialSnapshotsAcrossFormulaVersions(active, comparisonCandidate)
+  ) ? comparisonCandidate : null;
   State.snapshotList = comparison ? [active, comparison] : [active];
   await loadSnapshotIntoState(active);
   State.remotePublication = normalizeRemotePublication({ ...(remoteMeta || {}), payload_json: payload }, source, cachedAt);
@@ -6285,7 +6340,13 @@ function publicDataBannerHtml() {
 }
 function tatLegacyBannerHtml() {
   if (!State.activeSnapshot || !State.isLegacyTatSnapshot) return '';
+  // Official historical memakai satu catatan compatibility ringkas di bawah.
+  if (isLegacyOfficialSnapshot(State.activeSnapshot)) return '';
   return `<div class="alert alert-warn"><strong>Snapshot formula lama.</strong> Score masih memakai formula lama. Upload serta publikasikan file terbaru agar ranking memakai formula scoring terbaru.</div>`;
+}
+function legacyOfficialCompatibilityBannerHtml() {
+  if (!isLegacyOfficialSnapshot(State.activeSnapshot)) return '';
+  return `<div class="alert alert-warn" style="padding:8px 12px;margin-bottom:12px;font-size:12px;line-height:1.4;"><strong>Formula historis.</strong> Snapshot official ini ditampilkan dengan struktur dan denominator yang tersimpan saat dipublikasikan.</div>`;
 }
 async function refreshViewerData() {
   if (State.runtimeMode !== 'viewer') return;
@@ -6974,13 +7035,20 @@ function router() {
     root.innerHTML = renderNoDataState(); wireNoDataState(); return;
   }
   if (State.activeSnapshot && State.isLegacyHitRateSnapshot && LEGACY_BLOCKED_PATHS.has(path)) {
-    root.innerHTML = renderLegacySnapshotState(); wireLegacySnapshotState(); return;
+    // Local/unpublished legacy tetap diblokir. Official legacy hanya boleh lewat
+    // bila hasil inti dari payload immutable benar-benar dapat dirender.
+    if (!isLegacyOfficialSnapshot(State.activeSnapshot)) {
+      root.innerHTML = renderLegacySnapshotState(); wireLegacySnapshotState(); return;
+    }
+    if (!canRenderLegacyOfficialSnapshot(State.activeSnapshot)) {
+      root.innerHTML = renderCorruptLegacyOfficialState(); return;
+    }
   }
   if (activeCohort() && State.validation && State.validation.totalRead === 0) {
-    root.innerHTML = `${publicDataBannerHtml()}${tatLegacyBannerHtml()}${cohortEmptyStateHtml()}`;
+    root.innerHTML = `${publicDataBannerHtml()}${legacyOfficialCompatibilityBannerHtml()}${tatLegacyBannerHtml()}${cohortEmptyStateHtml()}`;
     return;
   }
-  root.innerHTML = `${publicDataBannerHtml()}${tatLegacyBannerHtml()}${renderFn(params)}`;
+  root.innerHTML = `${publicDataBannerHtml()}${legacyOfficialCompatibilityBannerHtml()}${tatLegacyBannerHtml()}${renderFn(params)}`;
   applyCohortPageContext(path);
   const wireFn = WIRE_FNS[path]; if (wireFn) wireFn(params);
 }
@@ -7000,6 +7068,28 @@ function renderLegacySnapshotState() {
 function wireLegacySnapshotState() {
   const b1 = document.getElementById('goto-upload-legacy-btn'); if (b1) b1.addEventListener('click', () => navigate('/upload'));
   const b2 = document.getElementById('goto-riwayat-legacy-btn'); if (b2) b2.addEventListener('click', () => navigate('/upload', { tab: 'riwayat' }));
+}
+function canRenderLegacyOfficialSnapshot(snapshot) {
+  if (!isLegacyOfficialSnapshot(snapshot)) return false;
+  if (!Array.isArray(snapshot.rawRecords) || !snapshot.rawRecords.length) return false;
+  if (snapshot !== State.activeSnapshot || !State.validation || !State.hierarchy) return false;
+  const national = State.hierarchy.national;
+  return Number(State.validation.totalEligible) > 0
+    && !!national
+    && national.finalScore !== null
+    && national.finalScore !== undefined
+    && Number.isFinite(Number(national.finalScore));
+}
+function renderCorruptLegacyOfficialState() {
+  const snapshot = State.activeSnapshot || {};
+  return `<div class="empty-state"><div class="empty-state-icon">⚠️</div><h2>Snapshot Official Tidak Dapat Ditampilkan</h2>
+    <p>Snapshot formula historis ini tidak memiliki hasil ranking inti yang cukup untuk dirender dengan aman. Sistem tidak membuat atau menghitung denominator baru.</p>
+    <div class="legacy-snapshot-info" style="display:inline-grid;gap:6px;text-align:left;background:#fff;border:1px solid var(--card-border);border-radius:10px;padding:12px 16px;margin:6px 0 16px;min-width:320px;">
+      <div><strong>File:</strong> ${escapeHtml(snapshot.fileName || '-')}</div>
+      <div><strong>Tanggal Data:</strong> ${snapshot.cutoffDate ? fmtDateId(snapshot.cutoffDate) : '-'}</div>
+      <div><strong>Revisi Data:</strong> ${snapshot.revisionNumber || 1}</div>
+    </div>
+    <p>Data publikasi tidak diubah. Hubungi Admin untuk memeriksa integritas payload official tersebut.</p></div>`;
 }
 function renderNoDataState() {
   if (State.runtimeMode === 'viewer') {
@@ -8251,7 +8341,7 @@ function trendEntityIdentity(level, row) {
 function trendPayloadSettings(payload) {
   const supplied = payload && payload.settings ? payload.settings : {};
   const periodKey = snapshotPeriodKey(payload && payload.activeSnapshot);
-  return resolvedKpiSettings(periodKey, { officialPayload: payload, settings: {
+  const resolved = resolvedKpiSettings(periodKey, { officialPayload: payload, settings: {
     ...defaultSettings(),
     ...supplied,
     weights: { ...getDefaultWeights(), ...(supplied.weights || {}) },
@@ -8259,6 +8349,7 @@ function trendPayloadSettings(payload) {
       ? supplied.statusSalesmanFilter.filter(status => STATUS_SALESMAN_ALL.includes(status))
       : [...STATUS_SALESMAN_DEFAULT]
   }});
+  return withSnapshotFormulaModel(resolved, payload && payload.activeSnapshot);
 }
 function withTrendPayloadContext(payload, fn) {
   const previous = {
@@ -8461,7 +8552,8 @@ async function buildOfficialTrendSeries(level, row) {
   const revisionSignature = officialPeriods.map(period => trendCacheKeyForPeriod(period)).join('~');
   const configurationSignature = (await trendMapWithConcurrency(officialPeriods, 2, async period => {
     const payload = await trendFetchOfficialPayload(period);
-    return trendPayloadSettings(payload).__kpiConfiguration.signature;
+    const settings = trendPayloadSettings(payload);
+    return `${settings.__kpiConfiguration.signature}~${settings.__formulaModel.signature}`;
   })).join('~');
   const scopeSignature = [
     scopeContext.cohortId ? `group:${scopeContext.cohortId}` : 'national',
@@ -8708,7 +8800,8 @@ async function buildNationalTrendSeries() {
   const revisionSignature = officialPeriods.map(period => trendCacheKeyForPeriod(period)).join('~');
   const configurationSignature = (await trendMapWithConcurrency(officialPeriods, 2, async period => {
     const payload = await trendFetchOfficialPayload(period);
-    return trendPayloadSettings(payload).__kpiConfiguration.signature;
+    const settings = trendPayloadSettings(payload);
+    return `${settings.__kpiConfiguration.signature}~${settings.__formulaModel.signature}`;
   })).join('~');
   const scopeSignature = [
     Array.from(scopeContext.phaseSet).sort().join('|'),
@@ -11872,7 +11965,7 @@ async function handleFileSelected(file) {
     const parsed = parseExcelWorkbook(buffer, { periodKey: requestedPeriodKey, cutoffDate: requestedCutoffDate });
     const periodKey = parsed.detectedPeriodKey || requestedPeriodKey;
     if (!periodKey) throw new ParseError('Periode tidak dapat ditentukan dari CUT OFF DATA workbook maupun field Tanggal / Cut-off Data Admin.');
-    const parserSettings = resolvedKpiSettings(periodKey, { settings: State.settings });
+    const parserSettings = withCurrentFormulaModel(resolvedKpiSettings(periodKey, { settings: State.settings }));
     if (parsed.rawRecords.length === 0) {
       clearUploadCandidate();
       hideLoadingOverlay(); previewArea.innerHTML = `<div class="alert alert-error">Upload dibatalkan. Dataset kosong: tidak ditemukan baris data Salesman. Pastikan format sesuai template.</div>`; return;
@@ -11882,7 +11975,7 @@ async function handleFileSelected(file) {
     State.uploadPreview = {
       file, buffer, parsed, dupInfo, resolution: dupInfo.duplicateCodes.length ? null : 'none',
       parsedPeriodKey: periodKey,
-      parserConfigurationSignature: parserSettings.__kpiConfiguration.signature
+      parserConfigurationSignature: `${parserSettings.__kpiConfiguration.signature}~${formulaModelForSettings(parserSettings).signature}`
     };
     syncWorkbookCutoffField(parsed);
     syncUploadPeriodFields();
@@ -11899,7 +11992,8 @@ async function handleFileSelected(file) {
 }
 
 function refreshUploadPreviewParser(up, periodKey, settings) {
-  const signature = settings && settings.__kpiConfiguration ? settings.__kpiConfiguration.signature : '';
+  const signature = settings && settings.__kpiConfiguration
+    ? `${settings.__kpiConfiguration.signature}~${formulaModelForSettings(settings).signature}` : '';
   const cutoffDate = (document.getElementById('cutoff-date-input') || {}).value;
   assertUploadCutoffMatchesWorkbook(up, cutoffDate);
   if (up.parsedPeriodKey === periodKey && up.parserConfigurationSignature === signature) return;
@@ -11997,7 +12091,7 @@ function renderUploadPreview() {
     previewArea.innerHTML = '<div class="alert alert-error"><strong>Upload dibatalkan.</strong> Periode tidak dapat ditentukan. Isi Tanggal / Cut-off Data yang valid.</div>';
     return;
   }
-  const previewSettings = resolvedKpiSettings(previewPeriodKey, { settings: State.settings });
+  const previewSettings = withCurrentFormulaModel(resolvedKpiSettings(previewPeriodKey, { settings: State.settings }));
   try {
     refreshUploadPreviewParser(up, previewPeriodKey, previewSettings);
   } catch (error) {
@@ -12217,7 +12311,8 @@ async function confirmSaveSnapshot() {
   const periodKey = periodKeyFromCutoffDate(cutoffDate);
   if (!periodKey) { showToast('Tanggal / Cut-off Data belum valid sehingga periode tidak dapat ditentukan.', 'error'); return; }
   const periodStatus = uploadPeriodStatusValue();
-  const periodKpiSettings = resolvedKpiSettings(periodKey, { settings: State.settings });
+  // Preview, save, dan preflight kandidat upload memakai object context CURRENT yang sama.
+  const periodKpiSettings = withCurrentFormulaModel(resolvedKpiSettings(periodKey, { settings: State.settings }));
   try {
     refreshUploadPreviewParser(up, periodKey, periodKpiSettings);
   } catch (error) {
@@ -12454,7 +12549,10 @@ function renderRiwayatTable() {
       navigate(isLegacyHitRateSnapshot(active) ? '/upload' : '/dashboard');
     } else if (e.target.classList.contains('act-view')) {
       const snap = await Storage.getSnapshot(id);
-      const settings = resolvedKpiSettings(snapshotPeriodKey(snap), { settings: State.settings, immutableConfiguration: snapshotImmutableKpiConfiguration(snap) });
+      const settings = withSnapshotFormulaModel(
+        resolvedKpiSettings(snapshotPeriodKey(snap), { settings: State.settings, immutableConfiguration: snapshotImmutableKpiConfiguration(snap) }),
+        snap
+      );
       const validation = validateDataset(snap.rawRecords, settings);
       const hierarchy = buildHierarchy(validation, settings);
       const topSales = rankList(hierarchy.salesmanScored, x => x.rec.namaSalesman).slice(0, 10);
@@ -12463,7 +12561,10 @@ function renderRiwayatTable() {
         <tbody>${topSales.map(s => `<tr><td>${s.rank}</td><td>${escapeHtml(s.rec.namaSalesman)}</td><td class="ta-right">${fmtNumber(s.finalScore, 2)}</td></tr>`).join('')}</tbody></table>`, { wide: true });
     } else if (e.target.classList.contains('act-export')) {
       const snap = await Storage.getSnapshot(id);
-      const settings = resolvedKpiSettings(snapshotPeriodKey(snap), { settings: State.settings, immutableConfiguration: snapshotImmutableKpiConfiguration(snap) });
+      const settings = withSnapshotFormulaModel(
+        resolvedKpiSettings(snapshotPeriodKey(snap), { settings: State.settings, immutableConfiguration: snapshotImmutableKpiConfiguration(snap) }),
+        snap
+      );
       const validation = validateDataset(snap.rawRecords, settings);
       const hierarchy = buildHierarchy(validation, settings);
       const ranked = rankList(hierarchy.salesmanScored, x => x.rec.namaSalesman);
@@ -13037,6 +13138,42 @@ function hitRateScoreModel(snapshot) {
   if (!isLegacyHitRateSnapshot(snapshot)) return APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION;
   return String(snapshot.hitRateFormulaVersion || 'avgEc_div_totalCallEsuite_v1');
 }
+/**
+ * Satu resolver formula untuk seluruh reconstruction ranking.
+ * Model hanya berasal dari metadata/struktur snapshot, tidak pernah dari bulan.
+ * Snapshot null berarti proses current/non-historical (upload/demo sebelum aktif).
+ */
+function resolveSnapshotFormulaModel(snapshot) {
+  if (!snapshot) {
+    return Object.freeze({
+      hitRateFormulaVersion: APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION,
+      hitRateMode: 'effective_total_call_day',
+      tatFormulaVersion: APP_CONFIG.CURRENT_TAT_FORMULA_VERSION,
+      tatScoringMode: 'achievement_div_tat',
+      signature: `hit:${APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION}|tat:${APP_CONFIG.CURRENT_TAT_FORMULA_VERSION}`
+    });
+  }
+  const hitRateFormulaVersion = hitRateScoreModel(snapshot);
+  const tatFormulaVersion = tatScoreModel(snapshot);
+  const hitRateMode = hitRateFormulaVersion === APP_CONFIG.CURRENT_HIT_RATE_FORMULA_VERSION
+    ? 'effective_total_call_day' : 'legacy_total_call_esuite';
+  const tatScoringMode = tatFormulaVersion === APP_CONFIG.CURRENT_TAT_FORMULA_VERSION
+    ? 'achievement_div_tat' : 'legacy_achievement';
+  return Object.freeze({
+    hitRateFormulaVersion, hitRateMode, tatFormulaVersion, tatScoringMode,
+    signature: `hit:${hitRateFormulaVersion}|tat:${tatFormulaVersion}`
+  });
+}
+function withSnapshotFormulaModel(settings, snapshot) {
+  return { ...(settings || {}), __formulaModel: resolveSnapshotFormulaModel(snapshot) };
+}
+function withCurrentFormulaModel(settings) {
+  return withSnapshotFormulaModel(settings, null);
+}
+function formulaModelForSettings(settings) {
+  if (settings && settings.__formulaModel && typeof settings.__formulaModel.signature === 'string') return settings.__formulaModel;
+  return resolveSnapshotFormulaModel(State.activeSnapshot || null);
+}
 async function loadSnapshotIntoState(snapshot) {
   State.vacantSelection.clear();
   Object.values(State.rankingHeaderFilters).forEach(filters => Object.keys(filters).forEach(key => delete filters[key]));
@@ -13181,7 +13318,8 @@ function createDemoSnapshot(periodKey, periodIndex) {
   const workdayMtd = isSeptember ? 5 : 25;
   const rawRecords = createDemoRecords(periodKey, periodIndex, { periodStatus, workdayMtd });
   applyEffectiveTotalCallContext(rawRecords, periodStatus, workdayMtd);
-  const validation = validateDataset(rawRecords);
+  const demoSettings = withCurrentFormulaModel(resolvedKpiSettings(periodKey, { settings: State.settings || defaultSettings() }));
+  const validation = validateDataset(rawRecords, demoSettings);
   return {
     id: `demo-${periodKey}`, cutoffDate: `${periodKey}-${dayByMonth[periodKey] || '28'}`, revisionNumber: 1,
     uploadedAt: Date.UTC(2026, Number(periodKey.slice(5, 7)) - 1, Number(dayByMonth[periodKey] || 28), 12),
@@ -13212,7 +13350,10 @@ function createLocalDemoProvider() {
     getOfficialPeriodSnapshot: periodKey => {
       const basePayload = payloads.get(periodKey);
       if (!basePayload) return null;
-      const effective = resolvedKpiSettings(periodKey, { settings: State.settings || settings });
+      const effective = withSnapshotFormulaModel(
+        resolvedKpiSettings(periodKey, { settings: State.settings || settings }),
+        basePayload.activeSnapshot
+      );
       const config = effective.__kpiConfiguration;
       const payload = {
         ...basePayload,
