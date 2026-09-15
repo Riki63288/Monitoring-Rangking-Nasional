@@ -97,7 +97,11 @@ body{margin:0;font-family:var(--font);background:var(--bg);color:var(--ink);min-
 .sidebar-icon{width:18px;text-align:center;flex-shrink:0;font-size:15px;}
 #app-shell.sidebar-collapsed .sidebar-link{justify-content:center;}
 .sidebar-cohort{margin:2px 0 5px;border-radius:9px;background:rgba(255,255,255,.035);overflow:hidden;}
-.sidebar-cohort summary{display:flex;align-items:center;gap:9px;padding:8px 10px;color:#f2d78c;font-size:12.5px;font-weight:800;cursor:pointer;list-style:none;white-space:nowrap;}
+.sidebar-cohort summary{display:flex;align-items:center;gap:9px;padding:7px 10px;color:#f2d78c;font-size:12.5px;font-weight:800;cursor:pointer;list-style:none;white-space:nowrap;}
+/* Subtext rentang bulan: informasi sekunder, TIDAK boleh melebarkan sidebar.
+   min-width:0 + ellipsis menjaga lebar #sidebar existing (240px) tetap sama. */
+.sidebar-cohort-text{display:flex;flex-direction:column;min-width:0;line-height:1.18;}
+.sidebar-cohort-range{font-size:9.5px;font-weight:500;color:#9aa3b2;opacity:.8;letter-spacing:.1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .sidebar-cohort summary::-webkit-details-marker{display:none;}
 .sidebar-cohort summary::before{content:'▸';width:12px;color:#9aa3b2;transition:transform .15s ease;}
 .sidebar-cohort[open] summary::before{transform:rotate(90deg);}
@@ -105,7 +109,7 @@ body{margin:0;font-family:var(--font);background:var(--bg);color:var(--ink);min-
 .sidebar-cohort-links .sidebar-link{padding:7px 9px;font-size:12.5px;margin:1px 0;}
 .sidebar-cohort-links .sidebar-icon{font-size:13px;}
 #app-shell.sidebar-collapsed .sidebar-cohort summary{justify-content:center;padding:8px 3px;}
-#app-shell.sidebar-collapsed .sidebar-cohort summary::before,#app-shell.sidebar-collapsed .sidebar-cohort-name{display:none;}
+#app-shell.sidebar-collapsed .sidebar-cohort summary::before,#app-shell.sidebar-collapsed .sidebar-cohort-name,#app-shell.sidebar-collapsed .sidebar-cohort-text{display:none;}
 #app-shell.sidebar-collapsed .sidebar-cohort-links{padding:0 3px 5px;}
 #app-shell.sidebar-collapsed .sidebar-cohort-links .sidebar-link{padding:7px 3px;}
 .demo-runtime-notice{flex-basis:100%;order:98;background:#fff7d6;color:#765600;border:1px solid #ead68b;border-radius:8px;padding:7px 12px;font-size:11.5px;font-weight:800;}
@@ -1911,25 +1915,167 @@ function makeVacantEntry(rec) {
 function phaseValueOfRecord(record) { return String((record && record.phaseProject) || '').trim(); }
 // Identitas Phase stabil: label lengkap tetap tampil, tetapi pencocokan memakai "PHASE n".
 // Nilai non-standar memakai full value yang dinormalisasi sebagai fallback generic.
+/* ------------------------------------------------------------
+   COMPATIBILITY ALIAS PHASE
+   ------------------------------------------------------------
+   "HOLD" pada Excel berjalan adalah label sementara untuk
+   PHASE 8 - 01 SEPTEMBER 2026 (Excel belum diganti karena PIC cuti).
+   Alias ini diterapkan di level CANONICAL KEY, bukan sekadar teks di DOM:
+     HOLD                          -> PHASE 8
+     PHASE 8                       -> PHASE 8
+     PHASE 8 - 01 SEPTEMBER 2026   -> PHASE 8
+     PHASE 8 - 01 SEP 2026         -> PHASE 8
+   Konsekuensinya satu identitas dipakai seragam oleh scope kelompok, catalog,
+   filter global, fingerprint cache, dan Global Ranking Group Config —
+   termasuk config production lama yang masih menyimpan "HOLD" (dinormalisasi
+   saat dibaca, TANPA migration database dan TANPA memaksa Admin Save ulang).
+   RAW RECORD TIDAK PERNAH DIMUTASI: record tetap berisi "HOLD" untuk audit.
+   ------------------------------------------------------------ */
+const PHASE_CANONICAL_ALIAS_RULES = Object.freeze([
+  { test: /^HOLD\b/, key: 'PHASE 8' }
+]);
 function canonicalPhaseKey(value) {
   const normalized = String(value === null || value === undefined ? '' : value).trim().replace(/\s+/g, ' ').toUpperCase();
   if (!normalized) return '';
   const match = normalized.match(/\bPHASE\s*[-_:]?\s*(\d+)\b/i);
-  return match ? `PHASE ${Number(match[1])}` : normalized;
+  if (match) return `PHASE ${Number(match[1])}`;
+  const alias = PHASE_CANONICAL_ALIAS_RULES.find(rule => rule.test.test(normalized));
+  return alias ? alias.key : normalized;
 }
 function phaseNumberFromKey(key) {
   const match = canonicalPhaseKey(key).match(/^PHASE (\d+)$/);
   return match ? Number(match[1]) : null;
 }
-function availablePhaseCatalog(snapshot = State.activeSnapshot) {
+
+/* ------------------------------------------------------------
+   PHASE METADATA — SATU RESOLVER TANGGAL & LABEL
+   ------------------------------------------------------------
+   Prioritas start date:
+     1. jadwal known compatibility PHASE 1..8 (OTORITATIF)
+     2. tanggal yang tertulis pada label Phase, mis. "PHASE 9 - 01 OKTOBER 2026"
+        -> 2026-10-01 (future Phase otomatis jalan tanpa update kode)
+     3. tidak diketahui -> null (pemanggil wajib fallback, tidak boleh crash)
+
+   MENGAPA jadwal known didahulukan untuk PHASE 1..8, bukan label:
+     tanggal pada label Excel TIDAK SELALU tanggal mulai Phase. Pada dataset nyata
+     (dan pada fixture Demo) seluruh baris dapat berlabel tanggal CUT-OFF yang sama,
+     mis. "PHASE 1 - 08 SEPTEMBER 2026" dan "PHASE 7 - 08 SEPTEMBER 2026". Bila label
+     dipercaya lebih dulu, seluruh kelompok akan menampilkan rentang bulan yang sama
+     dan salah. Karena PHASE 1..8 jadwalnya sudah pasti, jadwal itulah sumber
+     kebenaran; label hanya dipakai untuk Phase yang belum ada di jadwal.
+     Ini TIDAK memengaruhi label yang ditampilkan — phaseDisplayLabel() tetap
+     memakai label asli Excel bila tersedia.
+   Parsing tanggal hanya ada di helper ini; jangan disebar ke function lain.
+   ------------------------------------------------------------ */
+const PHASE_MONTH_SHORT_ID = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+const PHASE_MONTH_LOOKUP = Object.freeze({
+  JAN: 0, JANUARI: 0, JANUARY: 0, FEB: 1, FEBRUARI: 1, FEBRUARY: 1, PEB: 1,
+  MAR: 2, MARET: 2, MARCH: 2, APR: 3, APRIL: 3, MEI: 4, MAY: 4,
+  JUN: 5, JUNI: 5, JUNE: 5, JUL: 6, JULI: 6, JULY: 6,
+  AGU: 7, AGT: 7, AGS: 7, AGUSTUS: 7, AUG: 7, AUGUST: 7,
+  SEP: 8, SEPT: 8, SEPTEMBER: 8, OKT: 9, OCT: 9, OKTOBER: 9, OCTOBER: 9,
+  NOV: 10, NOVEMBER: 10, DES: 11, DEC: 11, DESEMBER: 11, DECEMBER: 11
+});
+// Jadwal known (compatibility metadata). Dipakai HANYA bila label Excel tidak
+// memuat tanggal — mis. raw "HOLD" atau "PHASE 8" polos.
+const KNOWN_PHASE_SCHEDULE = Object.freeze({
+  'PHASE 1': { y: 2025, m: 10, d: 3 },   // 03 November 2025
+  'PHASE 2': { y: 2025, m: 11, d: 15 },  // 15 Desember 2025
+  'PHASE 3': { y: 2026, m: 2,  d: 2 },   // 02 Maret 2026
+  'PHASE 4': { y: 2026, m: 4,  d: 4 },   // 04 Mei 2026
+  'PHASE 5': { y: 2026, m: 5,  d: 1 },   // 01 Juni 2026
+  'PHASE 6': { y: 2026, m: 6,  d: 1 },   // 01 Juli 2026
+  'PHASE 7': { y: 2026, m: 7,  d: 1 },   // 01 Agustus 2026
+  'PHASE 8': { y: 2026, m: 8,  d: 1 }    // 01 September 2026
+});
+const KNOWN_PHASE_MONTH_NAME_ID = ['JANUARI', 'FEBRUARI', 'MARET', 'APRIL', 'MEI', 'JUNI', 'JULI', 'AGUSTUS', 'SEPTEMBER', 'OKTOBER', 'NOVEMBER', 'DESEMBER'];
+// "PHASE 8 - 01 SEPTEMBER 2026" -> Date(2026, 8, 1). Mengembalikan null bila label
+// tidak memuat pola "DD NAMA-BULAN YYYY".
+function parsePhaseLabelDate(label) {
+  const text = String(label === null || label === undefined ? '' : label).trim().replace(/\s+/g, ' ').toUpperCase();
+  if (!text) return null;
+  const match = text.match(/(\d{1,2})\s+([A-Z]+)\s+(\d{4})/);
+  if (!match) return null;
+  const monthIndex = PHASE_MONTH_LOOKUP[match[2]];
+  if (monthIndex === undefined) return null;
+  const day = Number(match[1]), year = Number(match[3]);
+  if (!Number.isFinite(day) || day < 1 || day > 31 || !Number.isFinite(year)) return null;
+  const date = new Date(year, monthIndex, day);
+  return isNaN(date.getTime()) ? null : date;
+}
+// Label mentah TERBAIK yang pernah terlihat untuk satu canonical key pada snapshot
+// aktif. Label yang benar-benar menyebut "PHASE" diprioritaskan di atas alias
+// seperti "HOLD", sehingga editor/filter tidak pernah menampilkan "HOLD".
+function rawPhaseLabelMap(snapshot = State.activeSnapshot) {
   const map = new Map();
   const records = Array.isArray(snapshot && snapshot.rawRecords) ? snapshot.rawRecords : [];
   records.forEach(record => {
     const label = phaseValueOfRecord(record);
     const key = canonicalPhaseKey(label);
-    if (key && (!map.has(key) || label.length > map.get(key).length)) map.set(key, label);
+    if (!key || !label) return;
+    const current = map.get(key);
+    if (!current) { map.set(key, label); return; }
+    const currentIsPhase = /\bPHASE\b/i.test(current), nextIsPhase = /\bPHASE\b/i.test(label);
+    if (nextIsPhase && !currentIsPhase) { map.set(key, label); return; }
+    if (nextIsPhase === currentIsPhase && label.length > current.length) map.set(key, label);
   });
-  return Array.from(map, ([key, label]) => ({ key, label, number: phaseNumberFromKey(key) }))
+  return map;
+}
+// Label Phase yang ditampilkan ke user. Satu resolver untuk catalog, editor,
+// filter global, dan Ranking Phase — jangan mengganti string "HOLD" ad-hoc di DOM.
+function phaseDisplayLabel(phaseKey, rawLabel) {
+  const key = canonicalPhaseKey(phaseKey);
+  if (!key) return '';
+  if (rawLabel && /\bPHASE\b/i.test(String(rawLabel))) return String(rawLabel);
+  const schedule = KNOWN_PHASE_SCHEDULE[key];
+  if (schedule) {
+    const day = String(schedule.d).padStart(2, '0');
+    return `${key} - ${day} ${KNOWN_PHASE_MONTH_NAME_ID[schedule.m]} ${schedule.y}`;
+  }
+  // Alias tanpa jadwal known (mis. label bebas) tetap tampil canonical, bukan alias mentah.
+  return rawLabel && canonicalPhaseKey(rawLabel) === key && key === String(rawLabel).trim().toUpperCase() ? String(rawLabel) : key;
+}
+/* Start date satu canonical Phase. TIDAK bergantung pada snapshot aktif saja:
+   bila periode yang sedang dibuka belum memiliki Phase tersebut, jadwal known
+   tetap dipakai. Ini yang membuat subtitle sidebar konsisten lintas periode. */
+function phaseStartDate(phaseKey, labelMap) {
+  const key = canonicalPhaseKey(phaseKey);
+  if (!key) return null;
+  const schedule = KNOWN_PHASE_SCHEDULE[key];
+  if (schedule) return new Date(schedule.y, schedule.m, schedule.d);
+  const map = labelMap instanceof Map ? labelMap : rawPhaseLabelMap();
+  return parsePhaseLabelDate(map.get(key));
+}
+function phaseMonthShortLabel(date) { return `${PHASE_MONTH_SHORT_ID[date.getMonth()]} ${String(date.getFullYear()).slice(-2)}`; }
+/* Rentang bulan compact Bahasa Indonesia untuk satu kelompok:
+     tahun berbeda -> "Nov 25 – Mei 26"
+     tahun sama    -> "Jun – Jul 26"
+     satu bulan    -> "Sep 26"
+   Urutan kronologis ditentukan TANGGAL, bukan urutan array phaseKeys.
+   Phase yang tanggalnya benar-benar tidak diketahui -> fallback "Phase 9 – Phase 10". */
+function rankingGroupPhaseRangeLabel(cohort, labelMap) {
+  const keys = Array.from(new Set(((cohort && cohort.phaseKeys) || []).map(canonicalPhaseKey).filter(Boolean)));
+  if (!keys.length) return '';
+  const map = labelMap instanceof Map ? labelMap : rawPhaseLabelMap();
+  const dates = keys.map(key => phaseStartDate(key, map)).filter(Boolean).sort((a, b) => a - b);
+  if (!dates.length) {
+    const named = keys.map(key => key.replace(/^PHASE /, 'Phase '));
+    return named.length === 1 ? named[0] : `${named[0]} – ${named[named.length - 1]}`;
+  }
+  const first = dates[0], last = dates[dates.length - 1];
+  if (first.getFullYear() === last.getFullYear() && first.getMonth() === last.getMonth()) return phaseMonthShortLabel(first);
+  if (first.getFullYear() === last.getFullYear()) {
+    return `${PHASE_MONTH_SHORT_ID[first.getMonth()]} – ${PHASE_MONTH_SHORT_ID[last.getMonth()]} ${String(last.getFullYear()).slice(-2)}`;
+  }
+  return `${phaseMonthShortLabel(first)} – ${phaseMonthShortLabel(last)}`;
+}
+/* Catalog Phase dari snapshot. Dedupe berdasarkan CANONICAL KEY, sehingga dataset
+   transisi yang memuat "HOLD" DAN "PHASE 8 - 01 SEPTEMBER 2026" menghasilkan SATU
+   entry saja. Label yang ditampilkan memakai phaseDisplayLabel() — alias "HOLD"
+   tidak pernah tampil sebagai nama Phase. */
+function availablePhaseCatalog(snapshot = State.activeSnapshot) {
+  const map = rawPhaseLabelMap(snapshot);
+  return Array.from(map, ([key, rawLabel]) => ({ key, label: phaseDisplayLabel(key, rawLabel), rawLabel, number: phaseNumberFromKey(key) }))
     .sort((a, b) => (a.number ?? Number.MAX_SAFE_INTEGER) - (b.number ?? Number.MAX_SAFE_INTEGER) || a.label.localeCompare(b.label, 'id', { numeric: true }));
 }
 function defaultCohortsForSnapshot(snapshot = State.activeSnapshot) {
@@ -2070,10 +2216,16 @@ function recordMatchesCohort(record, cohort = activeCohort()) {
 function activeCohortPhaseLabels() {
   const cohort = activeCohort();
   if (!cohort) return [];
-  // Phase yang tidak ada pada periode aktif tetap ditampilkan memakai canonical key
-  // (mis. "PHASE 7"), bukan dihapus — config global berlaku lintas bulan.
+  // Phase yang tidak ada pada periode aktif tetap ditampilkan (config global berlaku
+  // lintas bulan) dan memakai central display resolver yang SAMA dengan catalog/editor.
+  // Tanpa ini, satu area bisa menampilkan "PHASE 8" sementara area lain menampilkan
+  // "PHASE 8 - 01 SEPTEMBER 2026". Consumer: info/subtitle kelompok, JPG, Excel,
+  // context ranking, trend, dan konteks historical.
   const catalog = new Map(availablePhaseCatalog().map(item => [item.key, item.label]));
-  return cohort.phaseKeys.map(key => catalog.get(canonicalPhaseKey(key)) || canonicalPhaseKey(key));
+  return cohort.phaseKeys.map(rawKey => {
+    const key = canonicalPhaseKey(rawKey);
+    return catalog.get(key) || phaseDisplayLabel(key);
+  });
 }
 function regionValueOfRecord(record) { return String((record && record.region) || '').trim(); }
 function recordMatchesGlobalScope(record, phaseSet, regionSet) {
@@ -7483,13 +7635,18 @@ function renderSidebar() {
       ];
       const nationalOpen = State.activeCohortId === null && COHORT_RANKING_PATHS.has(parseHash().path) ? ' open' : '';
       groupsHtml += `<details class="sidebar-cohort" data-ranking-scope="national"${nationalOpen}>
-        <summary title="Ranking Nasional"><span class="sidebar-icon">★</span><span class="sidebar-cohort-name">Nasional</span></summary>
+        <summary title="Ranking Nasional — Semua Depo"><span class="sidebar-icon">★</span><span class="sidebar-cohort-text"><span class="sidebar-cohort-name">Nasional</span><span class="sidebar-cohort-range">Semua Depo</span></span></summary>
         <div class="sidebar-cohort-links">${levelItems.map(([path, icon, label]) => `<a href="#${path}" class="sidebar-link" data-path="${path}" data-scope="national" title="Nasional — ${label}"><span class="sidebar-icon">${icon}</span><span class="sidebar-label">${label}</span></a>`).join('')}</div>
       </details>`;
+      // Rentang bulan dihitung dari phaseKeys kelompok (effective resolver), BUKAN
+      // dari nama group — rename/custom group otomatis ikut benar. Label map dibuat
+      // sekali per render; Phase di luar periode aktif tetap memakai jadwal known.
+      const sidebarPhaseLabelMap = rawPhaseLabelMap();
       enabledCohorts().forEach(cohort => {
         const open = State.activeCohortId === cohort.id ? ' open' : '';
+        const rangeLabel = rankingGroupPhaseRangeLabel(cohort, sidebarPhaseLabelMap);
         groupsHtml += `<details class="sidebar-cohort" data-cohort-id="${escapeHtml(cohort.id)}"${open}>
-          <summary title="Ranking ${escapeHtml(cohort.name)}"><span class="sidebar-icon">◈</span><span class="sidebar-cohort-name">${escapeHtml(cohort.name)}</span></summary>
+          <summary title="Ranking ${escapeHtml(cohort.name)}${rangeLabel ? ` — ${escapeHtml(rangeLabel)}` : ''}"><span class="sidebar-icon">◈</span><span class="sidebar-cohort-text"><span class="sidebar-cohort-name">${escapeHtml(cohort.name)}</span>${rangeLabel ? `<span class="sidebar-cohort-range">${escapeHtml(rangeLabel)}</span>` : ''}</span></summary>
           <div class="sidebar-cohort-links">${levelItems.map(([path, icon, label]) => `<a href="${cardLink(path, { cohort: cohort.id })}" class="sidebar-link" data-path="${path}" data-cohort="${escapeHtml(cohort.id)}" title="${escapeHtml(cohort.name)} — ${label}"><span class="sidebar-icon">${icon}</span><span class="sidebar-label">${label}</span></a>`).join('')}</div>
         </details>`;
       });
@@ -7717,9 +7874,10 @@ function openGlobalMultiSelectPopover(buttonEl, config) {
 // (Phase menghitung dengan Regional aktif, dan sebaliknya) agar angka konsisten dengan AND antar dimensi.
 function globalPhaseOptionRows() {
   const records = applyGlobalScope(State.activeSnapshot ? State.activeSnapshot.rawRecords : [], new Set(), State.activeRegionFilters);
+  // Dihitung per CANONICAL key agar record "HOLD" ikut terhitung pada opsi PHASE 8.
   const counts = new Map();
-  records.forEach(r => { const v = phaseValueOfRecord(r); if (v) counts.set(v, (counts.get(v) || 0) + 1); });
-  return getPhaseOptions().map(value => ({ value, label: value, count: counts.get(value) || 0 }));
+  records.forEach(r => { const key = canonicalPhaseKey(phaseValueOfRecord(r)); if (key) counts.set(key, (counts.get(key) || 0) + 1); });
+  return getPhaseOptions().map(value => ({ value, label: value, count: counts.get(canonicalPhaseKey(value)) || 0 }));
 }
 function globalRegionOptionRows() {
   const records = applyGlobalScope(State.activeSnapshot ? State.activeSnapshot.rawRecords : [], State.activePhaseFilters, new Set());
@@ -13261,7 +13419,11 @@ function cohortEditorPhaseCatalog(groups) {
     (cohort && Array.isArray(cohort.phaseKeys) ? cohort.phaseKeys : []).forEach(rawKey => {
       const key = canonicalPhaseKey(rawKey);
       if (!key || known.has(key)) return;
-      known.set(key, { key, label: key, number: phaseNumberFromKey(key), missingFromPeriod: true });
+      // Phase di luar periode aktif TETAP memakai central display resolver, sehingga
+      // editor menampilkan "PHASE 8 - 01 SEPTEMBER 2026 (luar periode)", bukan
+      // "PHASE 8 (luar periode)". Tanggalnya datang dari KNOWN_PHASE_SCHEDULE —
+      // tidak ada label yang di-hardcode di sini.
+      known.set(key, { key, label: phaseDisplayLabel(key), rawLabel: null, number: phaseNumberFromKey(key), missingFromPeriod: true });
     });
   });
   return Array.from(known.values())
@@ -13498,11 +13660,13 @@ function wirePengaturanPage() {
 // Set kosong === "Semua" pada dimensi tersebut (perilaku identik dengan sebelum fitur ini ada).
 // Filter ini TIDAK menyentuh Data Sumber Excel (viewer selalu pakai snapshot.rawRecords utuh)
 // dan TIDAK PERNAH ikut dipublikasikan sebagai business data.
+/* Opsi Global Phase Filter = SATU item per canonical Phase (bukan per raw string),
+   memakai display label. "HOLD" tidak lagi muncul sebagai opsi terpisah dari
+   PHASE 8. Pencocokan record tetap canonical (recordMatchesGlobalScope), sehingga
+   memilih "PHASE 8 - 01 SEPTEMBER 2026" ikut menjaring record yang masih "HOLD". */
 function getPhaseOptions() {
   if (!State.activeSnapshot) return [];
-  const set = new Set();
-  (State.activeSnapshot.rawRecords || []).forEach(r => { const v = phaseValueOfRecord(r); if (v) set.add(v); });
-  return Array.from(set).sort((a, b) => a.localeCompare(b, 'id', { numeric: true }));
+  return availablePhaseCatalog(State.activeSnapshot).map(item => item.label);
 }
 function getRegionOptions() {
   if (!State.activeSnapshot) return [];
