@@ -31,6 +31,13 @@
     'PERIOD_MISMATCH',         // cancel: snapshot berada pada periode lain
     'PUBLICATION_NOT_CURRENT', // cancel: target bukan dataset resmi periode tsb
     'PUBLICATION_NOT_FOUND',
+    // --- save_ranking_group_config_v1 (supabase/ranking-group-config-migration.sql) ---
+    'RANKING_GROUP_VERSION_CONFLICT', // expected_version tidak sama dengan version DB
+    'RANKING_GROUP_DUPLICATE_ID',     // stable id dipakai lebih dari sekali (aktif maupun tidak)
+    'RANKING_GROUP_DUPLICATE_NAME',   // nama kelompok aktif dipakai lebih dari sekali
+    'RANKING_GROUP_PHASE_CONFLICT',   // satu Phase berada pada dua kelompok aktif
+    'RANKING_GROUP_EMPTY_PHASE',      // kelompok aktif tanpa Phase
+    'INVALID_RANKING_GROUP_PAYLOAD',
     'AUTH_REQUIRED',
     'ADMIN_REQUIRED'
   ];
@@ -399,6 +406,116 @@
     return (data || []).map(mapPeriodRow).filter(Boolean);
   }
 
+  // ==========================================================================
+  // API GLOBAL RANKING GROUP CONFIG (aditif — tidak mengubah API lama)
+  //
+  // Sumber data: public.ranking_group_config (singleton id='global'),
+  // lihat supabase/ranking-group-config-migration.sql.
+  //
+  // KEPEMILIKAN DATA:
+  //   published_snapshots  -> data/formula/KPI config/TAT/revisi PER PERIODE
+  //   ranking_group_config -> definisi Kelompok Ranking, GLOBAL untuk semua periode
+  // Keduanya terpisah: menyimpan Kelompok Ranking TIDAK membuat revisi publikasi,
+  // dan Publish TIDAK mengubah version config global.
+  //
+  // KEAMANAN: baca boleh anon/authenticated lewat RLS SELECT. Tulis HANYA lewat
+  // RPC SECURITY DEFINER yang memanggil public.is_current_user_admin() existing.
+  // Tidak ada service_role key di frontend dan tidak ada UPDATE tabel langsung.
+  // ==========================================================================
+
+  const RANKING_GROUP_CONFIG_TABLE = 'ranking_group_config';
+  const RANKING_GROUP_CONFIG_ID = 'global';
+  const RANKING_GROUP_FEATURE_MISSING = 'RANKING_GROUP_FEATURE_MISSING';
+
+  // Migration belum diterapkan -> tabel/RPC belum ada. Frontend memakai penanda ini
+  // untuk jatuh ke fallback legacy (cohorts publikasi/settings), BUKAN menampilkan error.
+  function isMissingRankingGroupObject(error) {
+    const code = error && typeof error.code === 'string' ? error.code : '';
+    const message = error && typeof error.message === 'string' ? error.message : '';
+    return code === '42P01' || code === '42703' || code === '42883'
+      || code === 'PGRST202' || code === 'PGRST205' || code === 'PGRST204'
+      || /ranking_group_config|save_ranking_group_config_v1/i.test(message);
+  }
+
+  function rankingGroupFeatureError() {
+    const error = new Error('Fitur Kelompok Ranking global belum aktif di database. Jalankan supabase/ranking-group-config-migration.sql.');
+    error.code = RANKING_GROUP_FEATURE_MISSING;
+    return error;
+  }
+
+  // Bentuk baris config yang seragam untuk frontend. updated_by TIDAK pernah diminta
+  // pada jalur baca (kolomnya memang tidak di-grant ke anon/authenticated).
+  function mapRankingGroupRow(row) {
+    if (!row) return null;
+    const version = Number(row.version);
+    return {
+      id: String(row.id || RANKING_GROUP_CONFIG_ID),
+      version: Number.isFinite(version) ? version : 0,
+      cohorts: Array.isArray(row.cohorts_json) ? row.cohorts_json : [],
+      updatedAt: row.updated_at == null ? '' : String(row.updated_at),
+      updatedBy: row.updated_by == null ? null : String(row.updated_by)
+    };
+  }
+
+  /**
+   * Config Kelompok Ranking global. Mengembalikan null HANYA bila baris belum pernah
+   * dibuat (Admin belum menekan "Simpan Kelompok") — itu kondisi VALID, bukan error.
+   * Baris yang ada dengan cohorts_json = [] TETAP dikembalikan sebagai config valid
+   * ({version, cohorts: []}) dan TIDAK PERNAH disamakan dengan null.
+   * Melempar error ber-code RANKING_GROUP_FEATURE_MISSING bila migration belum ada.
+   */
+  async function getRankingGroupConfig() {
+    const { data, error } = await getClient()
+      .from(RANKING_GROUP_CONFIG_TABLE)
+      .select('id,version,cohorts_json,updated_at')
+      .eq('id', RANKING_GROUP_CONFIG_ID)
+      .maybeSingle();
+    if (error) {
+      if (isMissingRankingGroupObject(error)) throw rankingGroupFeatureError();
+      throw safeError(error, 'Pengaturan Kelompok Ranking tidak dapat diambil.');
+    }
+    return mapRankingGroupRow(data);
+  }
+
+  /**
+   * Simpan config global (admin only) dengan optimistic concurrency.
+   * Seluruh validasi + locking + penaikan version dilakukan ATOMIC di dalam RPC.
+   * Service TIDAK pernah UPDATE tabel langsung dan tidak pernah memanggil RPC kedua.
+   *
+   * @param {Array}  cohorts         [{id,name,phaseKeys[],enabled,order}]
+   * @param {number} expectedVersion version yang dibaca sebelum edit; 0/null bila
+   *                                 config global belum pernah ada.
+   * @returns {Promise<{id,version,cohorts,updatedAt,updatedBy}>}
+   */
+  async function saveRankingGroupConfig(cohorts, expectedVersion) {
+    // Array KOSONG adalah payload yang sah: berarti "tidak ada Ranking Group".
+    // Yang ditolak hanyalah nilai yang bukan array.
+    if (!Array.isArray(cohorts)) throw new Error('Daftar Kelompok Ranking tidak valid.');
+    const expected = Number(expectedVersion);
+    const { data, error } = await getClient().rpc('save_ranking_group_config_v1', {
+      p_cohorts: cohorts,
+      p_expected_version: Number.isFinite(expected) && expected > 0 ? Math.floor(expected) : 0
+    });
+    if (error) {
+      // Business error backend didahulukan: pesannya sudah spesifik (mis. version
+      // conflict) dan tidak boleh tersamar menjadi "fitur belum aktif".
+      if (!periodErrorMessage(error) && isMissingRankingGroupObject(error)) throw rankingGroupFeatureError();
+      throw safeError(error, 'Pengaturan Kelompok Ranking tidak dapat disimpan.');
+    }
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) throw new Error('Penyimpanan Kelompok Ranking tidak mengembalikan hasil.');
+    const mapped = mapRankingGroupRow({
+      id: row.out_id,
+      version: row.out_version,
+      cohorts_json: row.out_cohorts,
+      updated_at: row.out_updated_at,
+      updated_by: row.out_updated_by
+    });
+    // Tidak ada version yang kembali = tidak ada bukti sukses. Jangan lapor sukses.
+    if (!mapped || !(mapped.version > 0)) throw new Error('Penyimpanan Kelompok Ranking tidak mengembalikan versi yang valid.');
+    return mapped;
+  }
+
   function onAuthStateChange(callback) {
     const { data } = getClient().auth.onAuthStateChange((event, session) => {
       callback(event, session || null);
@@ -427,6 +544,10 @@
     publishPeriodSnapshot,
     activatePeriodSnapshot,
     cancelPeriodPublication,
-    getPeriodPublicationHistory
+    getPeriodPublicationHistory,
+    // --- API Global Ranking Group Config (aditif) ---
+    RANKING_GROUP_FEATURE_MISSING,
+    getRankingGroupConfig,
+    saveRankingGroupConfig
   });
 })();
