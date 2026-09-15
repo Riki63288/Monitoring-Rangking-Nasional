@@ -1367,6 +1367,8 @@ const APP_CONFIG = {
   CURRENT_TAT_SOURCE: 'tatMtd',
   CURRENT_TAT_FORMULA_VERSION: 'achievement_div_tat_v1',
   STORE_SETTINGS: 'settings',
+  // Key cache Global Ranking Group Config di dalam STORE_SETTINGS (bukan id 'main').
+  RANKING_GROUP_CACHE_ID: 'ranking-group-global-cache',
   DEFAULT_AVG_EC_TARGET: 25,
   DEFAULT_SCORE_CAP: 120,
 
@@ -1681,6 +1683,10 @@ const State = {
   lastRankingLevel: null,
   isLocalDemo: false,
   activeCohortId: null,
+  // GLOBAL RANKING GROUP CONFIG — kepemilikan TERPISAH dari publication/periode.
+  // { cohorts, version, updatedAt, source } dengan source: remote | cache | demo.
+  // null = belum ada config global -> resolver jatuh ke legacy (payload/settings).
+  globalRankingGroupConfig: null,
   demoProvider: null,
   pageAbortController: null // E: lifecycle listener per halaman
 };
@@ -1715,6 +1721,7 @@ function settingsFingerprint(settings) {
   const formulaModel = formulaModelForSettings(effective);
   const tatValuePart = snapshot ? (snapshot.tatMtd ?? '') : '';
   return configPart + '|cohorts:' + JSON.stringify((settings && settings.cohorts) || [])
+    + '|grg:' + rankingGroupConfigSignature()
     + '|formula:' + formulaModel.signature + '|tatValue:' + tatValuePart + '|' + globalScopeFingerprint();
 }
 // O: fingerprint KHUSUS untuk cache hierarchy (Detail KPI scoped & Ranking Phase). Mencakup seluruh input yang
@@ -1954,14 +1961,97 @@ function normalizeCohorts(cohorts) {
     };
   }).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
 }
-function ensureCohortsForAvailablePhases() {
+/* ------------------------------------------------------------
+   RESOLVER KELOMPOK RANKING — SATU SUMBER OTORITATIF
+   ------------------------------------------------------------
+   PRECEDENCE PRODUCTION:
+     1. Global Ranking Group Config (remote Supabase) bila valid
+     2. Global Ranking Group Config (cache lokal last-known-good) bila valid
+     3. Legacy: cohorts dari publication payload / settings lokal  (backward compat)
+     4. Default bootstrap dari Phase yang tersedia pada snapshot aktif
+
+   Seluruh consumer (sidebar, Ranking group, Detail KPI, Simulation, Trend, JPG,
+   Excel, fingerprint cache, editor) WAJIB lewat sini — tidak ada halaman yang
+   me-resolve sendiri dari State.settings.cohorts.
+
+   Ranking Nasional TIDAK disimpan sebagai cohort dan TIDAK dipengaruhi resolver ini.
+   ------------------------------------------------------------ */
+/* SEMANTICS PENTING — "tidak ada config" BERBEDA dari "config kosong":
+     null / row belum pernah dibuat  -> BELUM ADA config global -> fallback legacy
+     { version: 5, cohorts: [] }     -> config global RESMI yang valid, kebetulan
+                                        tidak memiliki Ranking Group editable.
+                                        JANGAN fallback legacy. Nasional tetap ada.
+   Keberadaan config ditentukan dari object + version + cohorts berupa array,
+   BUKAN dari cohorts.length. */
+function isValidGlobalRankingConfigShape(config) {
+  if (!config || typeof config !== 'object') return false;
+  if (!Array.isArray(config.cohorts)) return false;
+  const version = Number(config.version);
+  return Number.isFinite(version) && version > 0;
+}
+/* Normalisasi KETAT untuk config authoritative (remote/cache).
+   Config global dari server seharusnya SUDAH valid. Bila ternyata memuat duplicate
+   stable ID, config diperlakukan INVALID (fallback aman + warning), BUKAN diam-diam
+   diberi identity baru seperti normalizeCohorts() yang toleran terhadap data legacy.
+   Mengembalikan array (boleh kosong) bila valid, atau null bila tidak dapat dipakai. */
+function normalizeAuthoritativeRankingCohorts(rawCohorts, contextLabel) {
+  if (!Array.isArray(rawCohorts)) return null;
+  const seenIds = new Set();
+  for (const cohort of rawCohorts) {
+    const id = String((cohort && cohort.id) || '').trim();
+    if (!id) {
+      console.warn(`Global Ranking Group Config (${contextLabel || 'remote'}) memuat kelompok tanpa id stabil. Config diabaikan.`);
+      return null;
+    }
+    if (seenIds.has(id)) {
+      console.warn(`Global Ranking Group Config (${contextLabel || 'remote'}) memuat duplicate id "${id}". Config diabaikan — identity tidak pernah diganti diam-diam.`);
+      return null;
+    }
+    seenIds.add(id);
+  }
+  let list = null;
+  try { list = normalizeCohorts(rawCohorts); } catch (_) { list = null; }
+  return Array.isArray(list) ? list : null;
+}
+// Array kelompok dari config global bila config tersebut valid; null bila tidak ada
+// config global yang dapat dipakai. ARRAY KOSONG adalah hasil yang SAH.
+function normalizedGlobalRankingCohorts() {
+  const config = State.globalRankingGroupConfig;
+  if (!isValidGlobalRankingConfigShape(config)) return null;
+  return normalizeAuthoritativeRankingCohorts(config.cohorts, config.source || 'remote');
+}
+// Legacy fallback: cohorts yang ikut pada publication payload / settings lokal.
+function legacyRankingCohorts() {
   if (!State.settings) State.settings = defaultSettings();
   if (!Array.isArray(State.settings.cohorts)) State.settings.cohorts = defaultCohortsForSnapshot(State.activeSnapshot);
   else State.settings.cohorts = normalizeCohorts(State.settings.cohorts) || [];
+  return State.settings.cohorts || [];
 }
+// Apakah config global resmi sedang berlaku (termasuk saat isinya []).
+function hasAuthoritativeRankingGroupConfig() { return normalizedGlobalRankingCohorts() !== null; }
+function effectiveRankingGroups() {
+  const global = normalizedGlobalRankingCohorts();
+  // `global` bisa berupa [] — itu jawaban final, bukan alasan fallback.
+  return global === null ? legacyRankingCohorts() : global;
+}
+// Sumber efektif yang sedang dipakai — dipakai editor & laporan, bukan untuk logic scope.
+function effectiveRankingGroupSource() {
+  if (!hasAuthoritativeRankingGroupConfig()) return 'legacy';
+  const source = String((State.globalRankingGroupConfig && State.globalRankingGroupConfig.source) || 'remote');
+  return source === 'cache' ? 'cache' : (source === 'demo' ? 'demo' : 'remote');
+}
+// Signature untuk fingerprint cache: begitu version global berubah, seluruh cache
+// yang bergantung pada scope kelompok otomatis miss. Config kosong tetap memiliki
+// signature bervers, BUKAN 'legacy' — sehingga transisi groups <-> [] ikut membust cache.
+function rankingGroupConfigSignature() {
+  const groups = normalizedGlobalRankingCohorts();
+  if (groups === null) return 'legacy';
+  const config = State.globalRankingGroupConfig;
+  return `global:v${Math.floor(Number(config.version))}:${effectiveRankingGroupSource()}:n${groups.length}`;
+}
+function ensureCohortsForAvailablePhases() { effectiveRankingGroups(); }
 function enabledCohorts() {
-  ensureCohortsForAvailablePhases();
-  return (State.settings.cohorts || []).filter(cohort => cohort.enabled).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+  return effectiveRankingGroups().filter(cohort => cohort.enabled).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
 }
 function activeCohort() {
   return enabledCohorts().find(cohort => cohort.id === State.activeCohortId) || null;
@@ -1980,6 +2070,8 @@ function recordMatchesCohort(record, cohort = activeCohort()) {
 function activeCohortPhaseLabels() {
   const cohort = activeCohort();
   if (!cohort) return [];
+  // Phase yang tidak ada pada periode aktif tetap ditampilkan memakai canonical key
+  // (mis. "PHASE 7"), bukan dihapus — config global berlaku lintas bulan.
   const catalog = new Map(availablePhaseCatalog().map(item => [item.key, item.label]));
   return cohort.phaseKeys.map(key => catalog.get(canonicalPhaseKey(key)) || canonicalPhaseKey(key));
 }
@@ -2022,6 +2114,13 @@ function invalidateGlobalScopeCaches() {
   State.rankingCache.clear();
   State.detailKpiHierarchyCache.clear();
   State.phaseHierarchyCache.clear();
+}
+/* Invalidasi saat definisi Kelompok Ranking global berubah.
+   HANYA cache turunan scope kelompok yang dibuang. TIDAK menyentuh raw snapshot,
+   cache payload publikasi, Master Cabang, VACANT, maupun riwayat upload. */
+function invalidateRankingGroupCaches() {
+  invalidateGlobalScopeCaches();
+  if (State.trendSeriesCache instanceof Map) State.trendSeriesCache.clear();
 }
 function recomputeAfterVacantChange() {
   if (!State.activeSnapshot) return;
@@ -2320,6 +2419,20 @@ const Storage = (() => {
     const store = await tx(APP_CONFIG.STORE_SETTINGS, 'readonly');
     return new Promise((resolve, reject) => { const r = store.get('main'); r.onsuccess = () => resolve(r.result || null); r.onerror = (e) => reject(e.target.error); });
   }
+  // Cache LAST KNOWN GOOD config Kelompok Ranking global. Memakai object store
+  // settings existing dengan id TERPISAH — tidak pernah menimpa id 'main' dan
+  // tidak memerlukan perubahan schema IndexedDB.
+  async function saveRankingGroupCache(config) {
+    const store = await tx(APP_CONFIG.STORE_SETTINGS, 'readwrite');
+    return new Promise((resolve, reject) => {
+      const r = store.put({ id: APP_CONFIG.RANKING_GROUP_CACHE_ID, cohorts: config.cohorts, version: config.version, updatedAt: config.updatedAt || '', cachedAt: Date.now() });
+      r.onsuccess = () => resolve(); r.onerror = (e) => reject(e.target.error);
+    });
+  }
+  async function getRankingGroupCache() {
+    const store = await tx(APP_CONFIG.STORE_SETTINGS, 'readonly');
+    return new Promise((resolve, reject) => { const r = store.get(APP_CONFIG.RANKING_GROUP_CACHE_ID); r.onsuccess = () => resolve(r.result || null); r.onerror = (e) => reject(e.target.error); });
+  }
   async function listVacantSalesmen() {
     const store = await tx(APP_CONFIG.STORE_VACANT, 'readonly');
     return new Promise((resolve, reject) => { const r = store.getAll(); r.onsuccess = () => resolve((r.result || []).sort((a,b) => Number(b.markedAt || 0) - Number(a.markedAt || 0))); r.onerror = e => reject(e.target.error); });
@@ -2406,7 +2519,7 @@ const Storage = (() => {
       r.onerror = (e) => reject(e.target.error);
     });
   }
-  return { saveSnapshot, saveAndActivateSnapshot, rollbackFailedSnapshot, listSnapshots, getSnapshot, deleteSnapshot, setActiveSnapshot, getActiveSnapshot, saveSettings, getSettings, listVacantSalesmen, putVacantSalesmen, deleteVacantSalesman, clearVacantSalesmen, saveMasterCabang, getMasterCabang, saveViewerCache, getViewerCache, deleteViewerCache, listViewerCachePeriods };
+  return { saveSnapshot, saveAndActivateSnapshot, rollbackFailedSnapshot, listSnapshots, getSnapshot, deleteSnapshot, setActiveSnapshot, getActiveSnapshot, saveSettings, getSettings, saveRankingGroupCache, getRankingGroupCache, listVacantSalesmen, putVacantSalesmen, deleteVacantSalesman, clearVacantSalesmen, saveMasterCabang, getMasterCabang, saveViewerCache, getViewerCache, deleteViewerCache, listViewerCachePeriods };
 })();
 
 // LocalStorage: hanya untuk preferensi ringan (bukan dataset)
@@ -5534,7 +5647,8 @@ const AUTH_URL_KEYS = new Set(['access_token', 'refresh_token', 'expires_at', 'e
 const REMOTE_WRITE_METHODS = new Set([
   'signIn', 'signOut', 'publishPeriodSnapshot', 'publishNationalSnapshot',
   'activatePeriodSnapshot', 'activatePublishedSnapshot',
-  'cancelPeriodPublication', 'cancelPublishedPeriod', 'cancelPeriodSnapshot'
+  'cancelPeriodPublication', 'cancelPublishedPeriod', 'cancelPeriodSnapshot',
+  'saveRankingGroupConfig'
 ]);
 
 function isAdminRoute(route) { return ADMIN_ROUTES.has(route); }
@@ -6096,7 +6210,12 @@ function buildPublishedPayloadForScope(regions, comparisonCandidate, publication
       scoreCap: effectiveConfig.scoreCap,
       kpiConfigurationSnapshot: { ...effectiveConfig, activeKpis: { ...effectiveConfig.activeKpis }, weights: { ...effectiveConfig.weights } },
       detailKpiCharts: { ...(State.settings.detailKpiCharts || {}) },
-      statusSalesmanFilter: [...publishStatuses]
+      statusSalesmanFilter: [...publishStatuses],
+      // BACKWARD COMPATIBILITY: payload tetap membawa cohorts agar build/data lama
+      // tidak rusak. Isinya diambil dari config EFEKTIF (global bila tersedia),
+      // bukan State.settings.cohorts yang bisa tertinggal. Pada build baru nilai ini
+      // BUKAN otoritas — Global Ranking Group Config selalu diprioritaskan.
+      cohorts: normalizeCohorts(effectiveRankingGroups()) || []
     },
     masterCabang: sanitizeMasterCabangForPublish(activeSnapshot.rawRecords, regionKeySet),
     vacantEntries: sanitizeVacantEntriesForPublish(activeSnapshot.rawRecords, regionKeySet)
@@ -6174,6 +6293,9 @@ function normalizeRemotePublication(remoteMeta, source, cachedAt) {
 }
 async function hydratePublishedPayload(payload, remoteMeta, source, cachedAt) {
   validatePublishedPayload(payload);
+  // CATATAN OWNERSHIP: payload.settings.cohorts hanya mengisi State.settings.cohorts
+  // sebagai FALLBACK LEGACY. State.globalRankingGroupConfig TIDAK PERNAH disentuh di
+  // sini, sehingga berganti periode tidak pernah mengubah definisi Kelompok Ranking.
   const settings = {
     ...defaultSettings(),
     ...payload.settings,
@@ -6483,10 +6605,87 @@ function legacyOfficialCompatibilityBannerHtml() {
   if (!isLegacyOfficialSnapshot(State.activeSnapshot)) return '';
   return `<div class="alert alert-warn" style="padding:8px 12px;margin-bottom:12px;font-size:12px;line-height:1.4;"><strong>Formula historis.</strong> Snapshot official ini ditampilkan dengan struktur dan denominator yang tersimpan saat dipublikasikan.</div>`;
 }
+/* ============================================================
+   GLOBAL RANKING GROUP CONFIG — LOAD / SAVE
+   ============================================================
+   Config ini TERPISAH dari publication. Memuatnya tidak menyentuh
+   published_snapshots, dan menyimpannya tidak membuat revisi publikasi.
+   ============================================================ */
+function applyGlobalRankingGroupConfig(config, source) {
+  const previousSignature = rankingGroupConfigSignature();
+  const previousActiveId = State.activeCohortId;
+  const candidate = config
+    ? { cohorts: Array.isArray(config.cohorts) ? config.cohorts : null, version: Number(config.version) || 0, updatedAt: String(config.updatedAt || ''), source: source || 'remote' }
+    : null;
+  State.globalRankingGroupConfig = candidate;
+  // Hanya config yang BENTUKNYA rusak (bukan object/version<=0/cohorts bukan array/
+  // duplicate stable id) yang dibuang. cohorts = [] adalah config valid dan TETAP
+  // dipakai — resolver tidak boleh jatuh ke legacy hanya karena daftar kosong.
+  if (candidate && !hasAuthoritativeRankingGroupConfig()) State.globalRankingGroupConfig = null;
+  const changed = rankingGroupConfigSignature() !== previousSignature;
+  if (changed) invalidateRankingGroupCaches();
+  // ACTIVE GROUP PRESERVATION: kelompok aktif dipertahankan selama stable ID-nya
+  // masih ada dan masih enabled. Bila dihapus/di-nonaktifkan -> fallback Nasional.
+  if (previousActiveId && !enabledCohorts().some(cohort => cohort.id === previousActiveId)) State.activeCohortId = null;
+  return changed;
+}
+// Dipanggil saat bootstrap dan saat "Perbarui". TIDAK PERNAH melempar ke pemanggil:
+// kegagalan remote hanya berarti fallback ke cache/legacy, bukan aplikasi gagal.
+async function loadGlobalRankingGroupConfig({ allowCache = true } = {}) {
+  if (State.isLocalDemo) return { status: 'demo', changed: false };
+  let remoteError = null;
+  if (State.supabaseReady && window.SupabaseService && typeof window.SupabaseService.getRankingGroupConfig === 'function') {
+    try {
+      const remote = await window.SupabaseService.getRankingGroupConfig();
+      // Baris ADA (version valid) -> config resmi, termasuk bila cohorts = [].
+      if (isValidGlobalRankingConfigShape(remote)) {
+        const changed = applyGlobalRankingGroupConfig(remote, 'remote');
+        // Bentuk rusak (mis. duplicate id) ditolak applyGlobalRankingGroupConfig();
+        // jangan cache-kan config yang tidak dipakai.
+        if (hasAuthoritativeRankingGroupConfig()) {
+          try { await Storage.saveRankingGroupCache(remote); } catch (cacheError) { console.error('Cache Kelompok Ranking gagal disimpan:', cacheError); }
+          return { status: 'remote', changed };
+        }
+        console.warn('Global Ranking Group Config remote tidak dapat dipakai. Memakai fallback.');
+      } else {
+        // remote === null -> baris global BELUM PERNAH dibuat Admin. Ini BUKAN
+        // sama dengan cohorts = []: di sini legacy fallback memang benar.
+        applyGlobalRankingGroupConfig(null, null);
+        return { status: 'empty', changed: false };
+      }
+    } catch (error) {
+      remoteError = error;
+      // Migration belum diterapkan bukan kondisi error bagi pengguna.
+      const code = error && typeof error.code === 'string' ? error.code : '';
+      if (code !== (window.SupabaseService && window.SupabaseService.RANKING_GROUP_FEATURE_MISSING)) {
+        console.error('Kelompok Ranking global tidak dapat diambil:', error);
+      }
+    }
+  }
+  if (allowCache) {
+    try {
+      const cached = await Storage.getRankingGroupCache();
+      // Cache dengan version > 0 dan cohorts berupa array adalah last-known-good
+      // yang sah, termasuk ketika cohorts = [].
+      if (isValidGlobalRankingConfigShape(cached)) {
+        const changed = applyGlobalRankingGroupConfig(cached, 'cache');
+        if (hasAuthoritativeRankingGroupConfig()) return { status: 'cache', changed };
+        console.warn('Cache Kelompok Ranking tidak dapat dipakai. Memakai fallback legacy.');
+      }
+    } catch (cacheError) { console.error('Cache Kelompok Ranking tidak dapat dibaca:', cacheError); }
+  }
+  applyGlobalRankingGroupConfig(null, null);
+  return { status: remoteError ? 'error' : 'legacy', changed: false };
+}
+
 async function refreshViewerData() {
   if (State.runtimeMode !== 'viewer') return;
   showLoadingOverlay('Mengambil data nasional terbaru...');
   const result = await loadViewerNationalData({ allowCache: true, periodKey: State.activePeriodKey });
+  // Selain official data, Kelompok Ranking global ikut disegarkan. Periode aktif
+  // dipertahankan; kelompok aktif dipertahankan selama stable ID-nya masih ada.
+  const groupResult = await loadGlobalRankingGroupConfig({ allowCache: true });
+  if (groupResult.changed) recomputeFromSettings();
   hideLoadingOverlay();
   renderSidebar();
   router();
@@ -13049,9 +13248,28 @@ function openApplyKpiConfigurationModal(draft) {
     }
   });
 }
+/* Katalog Phase untuk EDITOR = UNION dari:
+     (a) seluruh phaseKeys yang sudah ada pada config Kelompok Ranking efektif, dan
+     (b) Phase yang tersedia pada snapshot/periode aktif.
+   Tanpa union, membuka periode yang tidak memiliki Phase 7 lalu menyimpan akan
+   MENGHAPUS Phase 7 dari U-20 secara global. Key yang tidak ada pada periode aktif
+   tetap tampil memakai canonical key sebagai label fallback (mis. "PHASE 7"). */
+function cohortEditorPhaseCatalog(groups) {
+  const catalog = availablePhaseCatalog();
+  const known = new Map(catalog.map(item => [item.key, item]));
+  (Array.isArray(groups) ? groups : []).forEach(cohort => {
+    (cohort && Array.isArray(cohort.phaseKeys) ? cohort.phaseKeys : []).forEach(rawKey => {
+      const key = canonicalPhaseKey(rawKey);
+      if (!key || known.has(key)) return;
+      known.set(key, { key, label: key, number: phaseNumberFromKey(key), missingFromPeriod: true });
+    });
+  });
+  return Array.from(known.values())
+    .sort((a, b) => (a.number ?? Number.MAX_SAFE_INTEGER) - (b.number ?? Number.MAX_SAFE_INTEGER) || a.label.localeCompare(b.label, 'id', { numeric: true }));
+}
 function cohortPhaseOptionsHtml(cohort, catalog) {
   const selected = new Set(cohort.phaseKeys || []);
-  return catalog.map(phase => `<label class="cohort-phase-option"><input type="checkbox" data-phase-key="${escapeHtml(phase.key)}" ${selected.has(phase.key) ? 'checked' : ''}/> ${escapeHtml(phase.label)}</label>`).join('');
+  return catalog.map(phase => `<label class="cohort-phase-option"${phase.missingFromPeriod ? ' title="Phase ini tidak ada pada periode aktif, tetapi tetap tersimpan pada konfigurasi global."' : ''}><input type="checkbox" data-phase-key="${escapeHtml(phase.key)}" ${selected.has(phase.key) ? 'checked' : ''}/> ${escapeHtml(phase.label)}${phase.missingFromPeriod ? ' <span class="muted">(luar periode)</span>' : ''}</label>`).join('');
 }
 function renderCohortSettingsPanel() {
   ensureCohortsForAvailablePhases();
@@ -13060,12 +13278,22 @@ function renderCohortSettingsPanel() {
     <div id="cohort-settings-list" class="cohort-settings-list"></div>
     <div id="cohort-unassigned-warning"></div>
     <div class="settings-actions"><button type="button" class="btn btn-primary" id="save-cohorts-btn">Simpan Kelompok</button></div>
-    <p class="settings-note">Perubahan Kelompok Ranking akan tampil di Viewer setelah data dipublikasikan.${State.isLocalDemo ? ' Dalam Mode Demo, perubahan hanya berlaku selama sesi ini.' : ''}</p>
+    <p class="settings-note">Pengaturan Kelompok Ranking bersifat global dan berlaku untuk seluruh periode setelah disimpan. Ranking Nasional tidak dipengaruhi pengaturan kelompok.${State.isLocalDemo ? ' Dalam Mode Demo, perubahan hanya berlaku selama sesi ini dan tidak pernah ditulis ke Supabase.' : ''}</p>
   </div>`;
 }
 function validateCohortDraft(cohorts) {
   const activeNames = new Map();
   const activePhases = new Map();
+  // STABLE ID wajib unik untuk SELURUH kelompok — aktif maupun tidak aktif —
+  // karena id adalah identitas yang dipakai route, cache, dan preservation.
+  // Ini defense-in-depth; save_ranking_group_config_v1 tetap otoritas final.
+  const seenIds = new Set();
+  for (const cohort of cohorts) {
+    const cohortId = String((cohort && cohort.id) || '').trim();
+    if (!cohortId) throw new Error('Setiap kelompok harus memiliki id yang stabil.');
+    if (seenIds.has(cohortId)) throw new Error(`Id kelompok "${cohortId}" digunakan lebih dari sekali.`);
+    seenIds.add(cohortId);
+  }
   for (const cohort of cohorts) {
     if (!cohort.name.trim()) throw new Error('Nama kelompok tidak boleh kosong.');
     if (!cohort.enabled) continue;
@@ -13083,8 +13311,13 @@ function validateCohortDraft(cohorts) {
 function wireCohortSettingsEditor() {
   const listEl = document.getElementById('cohort-settings-list');
   if (!listEl) return;
-  const catalog = availablePhaseCatalog();
-  let draft = normalizeCohorts(State.settings.cohorts || []) || [];
+  // Draft dibuka dari CONFIG EFEKTIF (global bila ada), bukan dari cohorts periode
+  // aktif. Berganti periode Mei/Agustus/September menampilkan isi yang SAMA.
+  // Bila config global RESMI berisi [], draft memang kosong — editor TIDAK PERNAH
+  // membangkitkan ulang Senior/U-23/U-20 dari legacy. Bootstrap default hanya
+  // berlaku pada state legacy/tanpa config global.
+  let draft = normalizeCohorts(effectiveRankingGroups()) || [];
+  const catalog = cohortEditorPhaseCatalog(draft);
   const newId = () => `cohort-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const collectFromDom = () => {
     const cards = Array.from(listEl.querySelectorAll('.cohort-editor-card'));
@@ -13124,15 +13357,48 @@ function wireCohortSettingsEditor() {
   });
   listEl.addEventListener('change', updateWarnings);
   document.getElementById('add-cohort-btn').addEventListener('click', () => { collectFromDom(); draft.push({ id: newId(), name: `Kelompok ${draft.length + 1}`, phaseKeys: [], enabled: true, order: draft.length + 1 }); render(); });
-  document.getElementById('save-cohorts-btn').addEventListener('click', async () => {
+  const saveBtn = document.getElementById('save-cohorts-btn');
+  saveBtn.addEventListener('click', async () => {
+    const restoreButton = () => { saveBtn.disabled = false; saveBtn.textContent = 'Simpan Kelompok'; };
     try {
       collectFromDom(); validateCohortDraft(draft);
-      State.settings.cohorts = draft.map((cohort, index) => ({ ...cohort, order: index + 1 }));
-      if (!State.isLocalDemo) await Storage.saveSettings(State.settings);
-      if (State.activeCohortId && !enabledCohorts().some(cohort => cohort.id === State.activeCohortId)) State.activeCohortId = null;
-      invalidateGlobalScopeCaches(); recomputeFromSettings(); renderSidebar(); router();
-      showToast('Pengaturan Kelompok Ranking berhasil disimpan.', 'success');
-    } catch (error) { showToast(safeUserError(error, 'Pengaturan Kelompok Ranking tidak valid.'), 'error'); }
+      const normalized = draft.map((cohort, index) => ({ ...cohort, order: index + 1 }));
+
+      if (State.isLocalDemo) {
+        // DEMO: tidak pernah memanggil RPC production. Perilaku lokal existing dipertahankan.
+        State.settings.cohorts = normalized;
+        if (State.activeCohortId && !enabledCohorts().some(cohort => cohort.id === State.activeCohortId)) State.activeCohortId = null;
+        invalidateRankingGroupCaches(); recomputeFromSettings(); renderSidebar(); router();
+        showToast('Pengaturan Kelompok Ranking berhasil disimpan untuk sesi Demo ini.', 'success');
+        return;
+      }
+
+      saveBtn.disabled = true; saveBtn.textContent = 'Menyimpan...';
+      // PRODUCTION: state efektif baru diperbarui SETELAH RPC sukses. Tidak ada
+      // "sukses lokal" yang menyesatkan bila Supabase gagal.
+      const expectedVersion = (State.globalRankingGroupConfig && Number(State.globalRankingGroupConfig.version)) || 0;
+      const saved = await invokeRemoteWrite('saveRankingGroupConfig', [normalized, expectedVersion], 'menyimpan Kelompok Ranking');
+      applyGlobalRankingGroupConfig(saved, 'remote');
+      try { await Storage.saveRankingGroupCache(saved); } catch (cacheError) { console.error('Cache Kelompok Ranking gagal disimpan:', cacheError); }
+      invalidateRankingGroupCaches(); recomputeFromSettings(); renderSidebar(); router();
+      restoreButton();
+      showToast('Pengaturan Kelompok Ranking berhasil disimpan dan berlaku untuk seluruh periode.', 'success');
+    } catch (error) {
+      restoreButton();
+      const code = error && typeof error.code === 'string' ? error.code : '';
+      if (code === (window.SupabaseService && window.SupabaseService.RANKING_GROUP_FEATURE_MISSING)) {
+        showToast('Kelompok Ranking global belum aktif di database. Jalankan supabase/ranking-group-config-migration.sql terlebih dahulu.', 'error');
+        return;
+      }
+      const message = safeUserError(error, 'Pengaturan Kelompok Ranking tidak dapat disimpan.');
+      // VERSION CONFLICT: state efektif, cache lokal, dan derived cache TIDAK disentuh —
+      // config terakhir yang confirmed tetap aktif dan tidak ada toast sukses.
+      // Admin diarahkan MUAT ULANG HALAMAN (bukan "Perbarui Data" yang merupakan
+      // control Viewer) agar versi terbaru terambil sebelum menyimpan kembali.
+      showToast(/telah berubah dari sesi lain/i.test(message)
+        ? 'Pengaturan Kelompok Ranking telah berubah dari sesi lain. Muat ulang halaman untuk mengambil versi terbaru sebelum menyimpan kembali.'
+        : message, 'error');
+    }
   });
   render();
 }
@@ -13691,6 +13957,10 @@ async function initApp() {
       State.isAdmin = false;
       await loadViewerNationalData({ allowCache: true });
     }
+
+    // Config Kelompok Ranking global dimuat SETELAH official dataset, sehingga
+    // hydrate payload (yang membawa settings.cohorts legacy) tidak pernah menimpanya.
+    await loadGlobalRankingGroupConfig({ allowCache: true });
 
     renderSidebar();
     window.addEventListener('hashchange', router);
