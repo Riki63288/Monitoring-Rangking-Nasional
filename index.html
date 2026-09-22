@@ -3603,10 +3603,33 @@ function computeGroupKpisAndScore(g, settings) {
   };
 }
 
-// Helper key konsisten untuk identitas Depo & ASS (dipakai di hierarchy, filter, dan drill-down
-// agar data dengan Kode Depo/NIK ASS kosong tidak menghasilkan halaman kosong).
+// Helper key konsisten untuk identitas Depo & ASS (dipakai di hierarchy, filter, drill-down,
+// comparison, trend, summary, dan export).
 function getDepoKey(rec) { return rec.kodeDepo || `__noKode_${rec.depo}`; }
-function getAssKey(rec) { return rec.nikAss || `__noNik_${rec.namaAss}`; }
+function normalizeAssIdentityPart(value) {
+  let normalized = String(value === null || value === undefined ? '' : value);
+  if (typeof normalized.normalize === 'function') normalized = normalized.normalize('NFKC');
+  return normalized.trim().replace(/\s+/g, ' ').toUpperCase();
+}
+function escapeAssKeyPart(value) {
+  return normalizeAssIdentityPart(value).replace(/%/g, '%25').replace(/:/g, '%3A');
+}
+function getAssKey(rec) {
+  const source = rec || {};
+  const region = normalizeAssIdentityPart(source.region);
+  const namaAss = normalizeAssIdentityPart(source.namaAss);
+  if (namaAss) return `ASS::${escapeAssKeyPart(region)}::${escapeAssKeyPart(namaAss)}`;
+
+  // Nama ASS kosong: NIK hanya menjadi fallback audit-safe, bukan identity saat nama valid.
+  // Bila NIK juga kosong, persempit fallback bertahap ke Depo lalu Salesman agar seluruh
+  // record tanpa nama dalam satu Regional tidak berbahaya tergabung menjadi satu ASS.
+  const nikAss = normalizeAssIdentityPart(source.nikAss);
+  if (nikAss) return `ASS::${escapeAssKeyPart(region)}::__NO_NAME_NIK::${escapeAssKeyPart(nikAss)}`;
+  const depoIdentity = normalizeAssIdentityPart(source.kodeDepo || source.depo);
+  if (depoIdentity) return `ASS::${escapeAssKeyPart(region)}::__NO_NAME_DEPO::${escapeAssKeyPart(depoIdentity)}`;
+  const salesmanIdentity = normalizeAssIdentityPart(source.kodeSalesman || source.namaSalesmanAwal || source.namaSalesman);
+  return `ASS::${escapeAssKeyPart(region)}::__NO_NAME_SALESMAN::${escapeAssKeyPart(salesmanIdentity || 'UNKNOWN')}`;
+}
 
 function buildHierarchy(validation, settings) {
   const __t0 = PERF_DEBUG ? performance.now() : 0;
@@ -3614,7 +3637,8 @@ function buildHierarchy(validation, settings) {
   const allRecords = [...validation.eligible, ...validation.notEligible];
   const salesmanScored = eligible.map(rec => ({ rec, ...calculateSalesmanKpis(rec, settings) }));
 
-  // NIK ASS = identitas unik ASS (satu ASS bisa membawahi >1 Depo)
+  // Nama ASS ternormalisasi + Regional = identitas unik ASS (satu ASS bisa membawahi >1 Depo).
+  // NIK tetap dipertahankan sebagai metadata raw/audit, tetapi bukan grouping key.
   const byAss = aggregateByGroup(eligible, allRecords, r => getAssKey(r),
     r => ({ namaAss: r.namaAss, nikAss: r.nikAss, depo: r.depo, region: r.region }), settings);
   byAss.forEach(a => {
@@ -3891,7 +3915,7 @@ function scopedHierarchyRows(hierarchy, level, scope = 'nasional', value = '') {
       ) || (ass.meta && ass.meta.region === value));
     } else if (scope === 'depo' && value) {
       const depoGroup = (hierarchy.byDepo || []).find(depo => depo.key === value);
-      rows = depoGroup ? rows.filter(ass => (ass.depoList || []).includes(depoGroup.meta.depo)) : [];
+      rows = depoGroup ? rows.filter(ass => (ass.eligibleMembers || []).some(member => getDepoKey(member) === depoGroup.key)) : [];
     }
     return rows;
   }
@@ -4624,7 +4648,7 @@ class DataTable {
     if (row.meta) {
       if (row.meta.cabang) return `cb:${row.meta.cabang}`;
       if (row.meta.kodeDepo) return `dp:${row.meta.kodeDepo}`;
-      if (row.meta.nikAss) return `as:${row.meta.nikAss}`;
+      if (row.meta.nikAss || row.meta.namaAss) return `as:${getAssKey(row.meta)}`;
       if (row.meta.region) return `rg:${row.meta.region}`;
     }
     try { return `js:${JSON.stringify(row).slice(0, 120)}`; } catch (e) { return `obj:${String(row)}`; } // fallback generik terakhir
@@ -8850,9 +8874,7 @@ function trendEntityIdentity(level, row) {
   }
   if (level === 'ass') {
     const meta = row.meta || {};
-    const nik = trendNormalizeIdentityPart(meta.nikAss);
-    const fallback = [meta.region, meta.namaAss].map(trendNormalizeIdentityPart).join('|');
-    return { key: nik ? `ass-nik:${nik}` : `ass-name:${fallback}`, display: String(meta.namaAss || row.key || '-') };
+    return { key: `ass:${getAssKey(meta)}`, display: String(meta.namaAss || row.key || '-') };
   }
   const rec = row.rec || {};
   const code = trendNormalizeIdentityPart(rec.kodeSalesman);
@@ -10302,7 +10324,7 @@ function wireRankingAssPage(params) {
     scopeLabel = `Regional: ${value}`; jpgTitleSuffix = `REGIONAL ${value.toUpperCase()}`; jpgFileSuffix = `Regional_${value}`;
   } else if (scope === 'depo' && value) {
     const depoGroup = State.hierarchy.byDepo.find(d => d.key === value);
-    if (depoGroup) { list = list.filter(a => (a.depoList || []).includes(depoGroup.meta.depo)); scopeLabel = `Depo: ${depoGroup.meta.depo}`; jpgTitleSuffix = `DEPO ${depoGroup.meta.depo.toUpperCase()}`; jpgFileSuffix = `Depo_${depoGroup.meta.depo}`; }
+    if (depoGroup) { list = list.filter(a => (a.eligibleMembers || []).some(member => getDepoKey(member) === depoGroup.key)); scopeLabel = `Depo: ${depoGroup.meta.depo}`; jpgTitleSuffix = `DEPO ${depoGroup.meta.depo.toUpperCase()}`; jpgFileSuffix = `Depo_${depoGroup.meta.depo}`; }
   }
   const ranked = decorateRankingComparison(rankList(list, x => x.meta.namaAss), 'ass', scope, value);
   const table = new DataTable({
@@ -10902,8 +10924,8 @@ function drilldownRows(parentLevel, parentRow, hierarchy, stack) {
     return (hierarchy.byAss || []).filter(row => (row.eligibleMembers || []).some(member => member.region === region));
   }
   if (parentLevel === 'cabang') {
-    // ASS yang memiliki minimal satu salesman pada Cabang ini. Identitas ASS memakai NIK ASS
-    // (getAssKey) sehingga dua ASS bernama sama tidak pernah tercampur.
+    // ASS yang memiliki minimal satu salesman pada Cabang ini. Identitas ASS memakai
+    // Nama ASS ternormalisasi + Regional melalui central getAssKey().
     const cabang = parentRow.meta && parentRow.meta.cabang;
     const depoKeysInCabang = new Set((hierarchy.byDepo || []).filter(row => row.meta && row.meta.cabang === cabang).map(row => row.key));
     return (hierarchy.byAss || []).filter(row => (row.eligibleMembers || []).some(member => depoKeysInCabang.has(getDepoKey(member))));
@@ -11220,7 +11242,7 @@ function getDetailKpiEntities(level, hierarchy = State.hierarchy) {
     metaText: joinMeta([s.rec.depo, s.rec.namaAss ? `ASS ${s.rec.namaAss}` : '']), item: s
   }));
   if (level === 'ass') return h.byAss.map(a => ({
-    name: a.meta.namaAss, region: a.meta.region, depo: a.meta.depo, nikAss: a.key,
+    name: a.meta.namaAss, region: a.meta.region, depo: a.meta.depo, assKey: a.key, nikAss: a.meta.nikAss,
     metaText: joinMeta([formatNikMeta(a.meta.nikAss), a.meta.depo, formatCountMeta(a.totalSalesman, 'salesman')]), item: a
   }));
   if (level === 'depo') return h.byDepo.map(d => ({
@@ -11247,7 +11269,16 @@ function getDetailKpiScopedEntities(level, scope, scopeValue, hierarchy = State.
     else if (level === 'ass') entities = entities.filter(e => e.item.key === scopeValue);
     else {
       const ag = hierarchy && hierarchy.byAss.find(a => a.key === scopeValue);
-      entities = ag ? entities.filter(e => (ag.depoList || []).includes(e.depo)) : [];
+      const assMembers = ag && Array.isArray(ag.eligibleMembers) ? ag.eligibleMembers : [];
+      const assDepoKeys = new Set(assMembers.map(getDepoKey));
+      const assRegions = new Set(assMembers.map(member => member.region));
+      const assCabangs = new Set(assMembers.map(detailKpiCabangOfRecord).filter(Boolean));
+      entities = ag ? entities.filter(e => {
+        if (level === 'depo') return !!(e.item && assDepoKeys.has(e.item.key));
+        if (level === 'cabang') return !!(e.item && assCabangs.has(e.item.key));
+        if (level === 'regional') return !!(e.item && assRegions.has(e.item.key));
+        return false;
+      }) : [];
     }
   }
   return entities;
