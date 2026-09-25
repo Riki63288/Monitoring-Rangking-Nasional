@@ -5815,9 +5815,12 @@ function noDataOrValue(v, formatter) { return (v === null || v === undefined || 
 /* ============================================================
    SUPABASE, MODE VIEWER/ADMIN, DAN PAYLOAD PUBLIKASI
    ============================================================ */
+// Route yang WAJIB Admin. '/ranking-phase' sengaja TIDAK ada di sini: halaman itu
+// read-only dan boleh dibuka Viewer. Seluruh route tulis/administratif lain tetap
+// diblokir router() lewat isAdminRoute(), termasuk akses direct URL.
 const ADMIN_ROUTES = new Set([
   '/upload', '/pengaturan', '/data-sumber', '/belum-eligible', '/publication-history',
-  '/settings', '/history', '/vacant', '/master-cabang', '/ranking-phase'
+  '/settings', '/history', '/vacant', '/master-cabang'
 ]);
 const AUTH_URL_KEYS = new Set(['access_token', 'refresh_token', 'expires_at', 'expires_in', 'token_type', 'type', 'code']);
 const REMOTE_WRITE_METHODS = new Set([
@@ -7417,7 +7420,9 @@ async function wirePublicationHistoryPage() {
    ============================================================ */
 const SIDEBAR_ITEMS = [
   { path: '/dashboard', icon: '🏠', label: 'Dashboard Utama', group: null },
-  { path: '/ranking-phase', icon: '🗓️', label: 'Ranking Phase', group: 'RANKING', adminOnly: true },
+  // Ranking Phase tersedia untuk Viewer DAN Admin (read-only bagi Viewer, memakai
+  // official published snapshot + Publish Scope + Global Filter existing).
+  { path: '/ranking-phase', icon: '🗓️', label: 'Ranking Phase', group: 'RANKING' },
   { path: '/ranking-regional', icon: '🌏', label: 'Ranking Regional', group: 'RANKING' },
   { path: '/ranking-cabang', icon: '🏬', label: 'Ranking Cabang', group: 'RANKING' },
   { path: '/ranking-depo', icon: '🏢', label: 'Ranking Depo', group: 'RANKING' },
@@ -7453,7 +7458,7 @@ function cardLink(path, params) {
 const COHORT_RANKING_PATHS = new Set(['/ranking-regional', '/ranking-cabang', '/ranking-depo', '/ranking-ass', '/ranking-salesman']);
 // Halaman yang memakai shared ranking page renderer: judul besar + breadcrumb TIDAK ditampilkan.
 // Berlaku generic untuk seluruh scope ranking (termasuk Nasional/Senior/Developing/New/Custom Group
-// yang merupakan cohort dari path ranking yang sama), dan untuk Ranking Phase (Admin).
+// yang merupakan cohort dari path ranking yang sama), dan untuk Ranking Phase (Viewer + Admin).
 const RANKING_PAGE_PATHS = new Set([...COHORT_RANKING_PATHS, '/ranking-phase']);
 function isRankingPagePath(path) { return RANKING_PAGE_PATHS.has(path); }
 // Dashboard Utama = satu-satunya halaman yang menampilkan chip ringkasan "Data: ...".
@@ -7652,7 +7657,10 @@ function renderSidebar() {
       currentGroup = 'RANKING';
       groupsHtml += '<div class="sidebar-group-title">RANKING</div>';
       const phaseItem = SIDEBAR_ITEMS.find(entry => entry.path === '/ranking-phase');
-      if (State.isAdmin) groupsHtml += `<a href="#/ranking-phase" class="sidebar-link" data-path="/ranking-phase" title="${escapeHtml(phaseItem.label)}"><span class="sidebar-icon">${phaseItem.icon}</span><span class="sidebar-label">${phaseItem.label}</span></a>`;
+      // Viewer dan Admin sama-sama melihat Ranking Phase. Blok ini dijaga
+      // `rankingGroupRendered` (dirender sekali per renderSidebar), sehingga tidak
+      // pernah muncul dua kali setelah login/logout/Perbarui/ganti periode.
+      if (phaseItem) groupsHtml += `<a href="#/ranking-phase" class="sidebar-link" data-path="/ranking-phase" title="${escapeHtml(phaseItem.label)}"><span class="sidebar-icon">${phaseItem.icon}</span><span class="sidebar-label">${phaseItem.label}</span></a>`;
       const levelItems = [
         ['/ranking-regional', '🌏', 'Regional'], ['/ranking-cabang', '🏬', 'Cabang'], ['/ranking-depo', '🏢', 'Depo'],
         ['/ranking-ass', '👔', 'ASS'], ['/ranking-salesman', '🧑‍💼', 'Salesman']
