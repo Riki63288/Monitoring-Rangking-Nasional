@@ -2706,10 +2706,60 @@ function findTargetSheet(workbook) {
   return names[0];
 }
 
+/* ------------------------------------------------------------
+   NORMALISASI KOORDINAT WORKSHEET
+   ------------------------------------------------------------
+   XLSX.utils.sheet_to_json({ header: 1 }) mengindeks array hasilnya RELATIF terhadap
+   sudut kiri-atas sheet['!ref'] (hdr[C] = C - range.s.c, baris mulai range.s.r), bukan
+   relatif terhadap A1. Jadi ketika '!ref' tidak dimulai di A1, indeks array BERGESER dari
+   koordinat fisik worksheet.
+
+   Seluruh pembacaan berbasis koordinat di parser ini mengasumsikan koordinat fisik:
+   XLSX.utils.encode_cell() (metadata CUT OFF DATA), WORKDAY_MTD_ROW_INDEX/COL_INDEX (HK G2),
+   fallbackCol pada FIELD_MAP, dan __excelRow pada record. Karena itu pergeseran diselesaikan
+   SATU KALI di sumbernya — array baris dinormalisasi agar indeksnya identik dengan koordinat
+   fisik worksheet (0-based) — bukan dengan menambahkan offset hardcode di tiap pembacaan.
+   Sheet yang memang dimulai di A1 tidak berubah sama sekali (origin 0,0 -> array asli).
+   ------------------------------------------------------------ */
+function worksheetOrigin(sheet) {
+  const ref = sheet && typeof sheet === 'object' ? sheet['!ref'] : null;
+  if (!ref || !XLSX.utils || typeof XLSX.utils.decode_range !== 'function') return { r: 0, c: 0 };
+  try {
+    const range = XLSX.utils.decode_range(String(ref));
+    const startRow = range && range.s && Number.isFinite(Number(range.s.r)) ? Math.max(0, Number(range.s.r)) : 0;
+    const startCol = range && range.s && Number.isFinite(Number(range.s.c)) ? Math.max(0, Number(range.s.c)) : 0;
+    return { r: startRow, c: startCol };
+  } catch (_) {
+    return { r: 0, c: 0 }; // '!ref' tidak dapat dibaca -> jangan menebak origin
+  }
+}
+// Mengembalikan array baris yang indeks baris & kolomnya = koordinat fisik worksheet (0-based).
+function sheetRowsAlignedToWorksheet(sheet, extraOptions) {
+  const rows = XLSX.utils.sheet_to_json(sheet, Object.assign({ header: 1, defval: null }, extraOptions || {}));
+  const origin = worksheetOrigin(sheet);
+  if (!origin.r && !origin.c) return rows;
+  const aligned = [];
+  for (let i = 0; i < origin.r; i++) aligned.push([]);
+  for (let i = 0; i < rows.length; i++) {
+    const row = Array.isArray(rows[i]) ? rows[i] : [];
+    if (origin.c > 0) {
+      const padded = new Array(origin.c).fill(null);
+      aligned.push(padded.concat(row));
+    } else {
+      aligned.push(row);
+    }
+  }
+  return aligned;
+}
+
 // Mencari baris header sesungguhnya (bukan baris template duplikat) dengan mencari 'KODE SALESMAN'
-function findHeaderRowIndex(rows) {
+// startRow = baris fisik pertama worksheet, supaya jendela pencarian tidak menyusut setelah
+// normalisasi koordinat ketika '!ref' tidak dimulai pada baris 1.
+function findHeaderRowIndex(rows, startRow) {
   const marker = APP_CONFIG.HEADER_MARKER_TEXT;
-  for (let r = 0; r < Math.min(rows.length, 15); r++) {
+  const from = Number.isFinite(Number(startRow)) ? Math.max(0, Number(startRow)) : 0;
+  const until = Math.min(rows.length, from + 15);
+  for (let r = from; r < until; r++) {
     const row = rows[r]; if (!row) continue;
     for (let c = 0; c < row.length; c++) { if (normalizeHeaderText(row[c]) === marker) return r; }
   }
@@ -2969,8 +3019,10 @@ function normalizeCabangCode(value, formattedText) {
   if (/[A-Za-z]/.test(str)) str = str.toUpperCase();
   return str;
 }
-function findMasterCabangHeaderRow(rows) {
-  for (let r = 0; r < Math.min(rows.length, 12); r++) {
+function findMasterCabangHeaderRow(rows, startRow) {
+  const from = Number.isFinite(Number(startRow)) ? Math.max(0, Number(startRow)) : 0;
+  const until = Math.min(rows.length, from + 12);
+  for (let r = from; r < until; r++) {
     const row = rows[r]; if (!row) continue;
     const normalized = row.map(normalizeHeaderText);
     if (normalized.includes('CABANG') && (normalized.includes('KODE') || normalized.includes('KODE DEPO'))) return r;
@@ -2981,9 +3033,9 @@ function parseMasterCabangWorkbook(arrayBuffer) {
   const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: false });
   const sheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null });
-  const rowsFormatted = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: null }); // .w / tampilan asli sel, untuk kode
-  const headerRowIdx = findMasterCabangHeaderRow(rows);
+  const rows = sheetRowsAlignedToWorksheet(sheet, { raw: true });
+  const rowsFormatted = sheetRowsAlignedToWorksheet(sheet, { raw: false }); // .w / tampilan asli sel, untuk kode
+  const headerRowIdx = findMasterCabangHeaderRow(rows, worksheetOrigin(sheet).r);
   if (headerRowIdx === -1) throw new ParseError('Header Master Cabang (REGION / KODE / CABANG) tidak ditemukan. Pastikan struktur file sesuai template.');
   const headerRow = rows[headerRowIdx] || [];
   const colIndexMap = {}, matchedByName = {}, notFound = [];
@@ -3184,18 +3236,57 @@ function normalizeWorkdayMtdValue(raw) {
   return numeric;
 }
 function isValidWorkdayMtdValue(value) { return normalizeWorkdayMtdValue(value) !== null; }
-function readWorkdayMtdFromSheet(sheet, rows) {
-  if (sheet && typeof sheet === 'object') {
-    const cell = sheet[WORKDAY_MTD_CELL];
-    if (cell) {
-      if (cell.t === 'e') return null; // cell error (#VALUE!, #REF!, dst) -> jangan mengarang HK
-      const fromValue = normalizeWorkdayMtdValue(cell.v);
-      if (fromValue !== null) return fromValue;
-      return normalizeWorkdayMtdValue(cell.w); // formatted value sebagai cadangan pembacaan
+// Label HK yang benar-benar dipakai template historis. Pencarian label HANYA memakai daftar ini;
+// angka acak pada baris metadata TIDAK PERNAH diambil sebagai HK.
+const WORKDAY_MTD_LABELS = new Set([
+  'JUMLAH HKE', 'JUMLAH HK', 'TOTAL HKE', 'TOTAL HK', 'HKE', 'HK',
+  'HARI KERJA', 'JUMLAH HARI KERJA', 'TOTAL HARI KERJA',
+  'HARI KERJA EFEKTIF', 'JUMLAH HARI KERJA EFEKTIF', 'TOTAL HARI KERJA EFEKTIF',
+  'HKE MTD', 'HK MTD'
+]);
+function workdayMtdValueFromCell(cell) {
+  if (!cell) return null;
+  if (cell.t === 'e') return null; // cell error (#VALUE!, #REF!, dst) -> jangan mengarang HK
+  const fromValue = normalizeWorkdayMtdValue(cell.v);
+  if (fromValue !== null) return fromValue;
+  return normalizeWorkdayMtdValue(cell.w); // formatted value sebagai cadangan pembacaan
+}
+/* Prioritas pembacaan HK:
+   1. Cell kanonik G2 (WORKDAY_MTD_CELL) — koordinat fisik, tidak terpengaruh origin '!ref'.
+   2. Bila G2 tidak berisi bilangan bulat 1–31, cari LABEL HK yang didukung pada baris metadata
+      dan ambil nilai yang melekat pada label itu (kanan 1–3 sel, lalu sel tepat di bawahnya).
+   3. Bila tidak ada, HK dikembalikan null (ditampilkan "- HK", tidak dikarang).
+   Tidak ada rumus TAT/KPI yang diubah oleh perubahan pembacaan ini — hanya sumber angka HK. */
+function readWorkdayMtdDetailFromSheet(sheet, rows, startRow) {
+  const canonical = sheet && typeof sheet === 'object' ? workdayMtdValueFromCell(sheet[WORKDAY_MTD_CELL]) : null;
+  if (canonical !== null) return { value: canonical, sourceCell: WORKDAY_MTD_CELL, sourceLabel: '', resolution: 'canonical-cell' };
+
+  const from = Number.isFinite(Number(startRow)) ? Math.max(0, Number(startRow)) : 0;
+  const maxRows = Math.min(Array.isArray(rows) ? rows.length : 0, from + 8);
+  for (let r = from; r < maxRows; r++) {
+    const row = rows[r] || [];
+    for (let c = 0; c < row.length; c++) {
+      const label = normalizeHeaderText(row[c]);
+      if (!WORKDAY_MTD_LABELS.has(label)) continue;
+      const candidates = [];
+      for (let offset = 1; offset <= 3; offset++) candidates.push({ r, c: c + offset });
+      candidates.push({ r: r + 1, c });
+      for (const coord of candidates) {
+        const address = XLSX.utils.encode_cell(coord);
+        const value = workdayMtdValueFromCell(sheet && sheet[address]);
+        if (value !== null) return { value, sourceCell: address, sourceLabel: label, resolution: 'label-lookup' };
+      }
     }
   }
-  const row = Array.isArray(rows) && rows.length > WORKDAY_MTD_ROW_INDEX ? rows[WORKDAY_MTD_ROW_INDEX] : null;
-  return row ? normalizeWorkdayMtdValue(row[WORKDAY_MTD_COL_INDEX]) : null;
+
+  // Cadangan terakhir: baris/kolom kanonik dari array baris yang sudah disejajarkan ke koordinat fisik.
+  const canonicalRow = Array.isArray(rows) && rows.length > WORKDAY_MTD_ROW_INDEX ? rows[WORKDAY_MTD_ROW_INDEX] : null;
+  const fromRows = canonicalRow ? normalizeWorkdayMtdValue(canonicalRow[WORKDAY_MTD_COL_INDEX]) : null;
+  if (fromRows !== null) return { value: fromRows, sourceCell: WORKDAY_MTD_CELL, sourceLabel: '', resolution: 'canonical-row' };
+  return { value: null, sourceCell: WORKDAY_MTD_CELL, sourceLabel: '', resolution: 'not-found' };
+}
+function readWorkdayMtdFromSheet(sheet, rows, startRow) {
+  return readWorkdayMtdDetailFromSheet(sheet, rows, startRow).value;
 }
 function excelDateValueToIso(value, formattedValue) {
   if (value instanceof Date && !isNaN(value.getTime())) {
@@ -3206,41 +3297,148 @@ function excelDateValueToIso(value, formattedValue) {
     if (parsed && parsed.y && parsed.m && parsed.d) return normalizeExactCutoffDate(`${String(parsed.y).padStart(4, '0')}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`) || null;
   }
   const text = String(formattedValue || value || '').trim();
-  const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  const iso = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
   if (iso) return normalizeExactCutoffDate(`${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`) || null;
+  // Tanggal berupa TEKS pada metadata workbook. Hanya format yang TIDAK AMBIGU yang diterima:
+  // komponen pertama > 12 sehingga pasti hari (31/05/2026), atau nama bulan ditulis eksplisit
+  // (31 Mei 2026). Format seperti 05/06/2026 tetap ditolak karena dd/mm vs mm/dd tidak dapat
+  // dipastikan — sistem memblokir, tidak menebak.
+  const numericDmy = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (numericDmy) {
+    const first = Number(numericDmy[1]), second = Number(numericDmy[2]);
+    if (first > 12 && second >= 1 && second <= 12) {
+      return normalizeExactCutoffDate(`${numericDmy[3]}-${String(second).padStart(2, '0')}-${String(first).padStart(2, '0')}`) || null;
+    }
+    return null;
+  }
+  const namedMonth = text.match(/^(\d{1,2})[\s-]+([A-Za-z]{3,12})[\s-]+(\d{4})$/);
+  if (namedMonth) {
+    const monthIndex = monthIndexFromName(namedMonth[2]);
+    if (monthIndex !== null) {
+      return normalizeExactCutoffDate(`${namedMonth[3]}-${String(monthIndex + 1).padStart(2, '0')}-${namedMonth[1].padStart(2, '0')}`) || null;
+    }
+  }
   return null;
 }
-function readWorkbookCutoffMetadata(sheet, rows) {
-  const maxRows = Math.min(Array.isArray(rows) ? rows.length : 0, 8);
+// Nama bulan Indonesia (penuh & singkat) + Inggris. Tidak ada penebakan: nama yang tidak
+// dikenali mengembalikan null sehingga pembacaan tanggal gagal secara eksplisit.
+const MONTH_NAME_LOOKUP_ID_EN = (() => {
+  const map = new Map();
+  const full = ['JANUARI','FEBRUARI','MARET','APRIL','MEI','JUNI','JULI','AGUSTUS','SEPTEMBER','OKTOBER','NOVEMBER','DESEMBER'];
+  const english = ['JANUARY','FEBRUARY','MARCH','APRIL','MAY','JUNE','JULY','AUGUST','SEPTEMBER','OCTOBER','NOVEMBER','DECEMBER'];
+  const shortId = ['JAN','FEB','MAR','APR','MEI','JUN','JUL','AGU','SEP','OKT','NOV','DES'];
+  const shortEn = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  [full, english, shortId, shortEn].forEach(list => list.forEach((name, idx) => { if (!map.has(name)) map.set(name, idx); }));
+  return map;
+})();
+function monthIndexFromName(name) {
+  const key = String(name == null ? '' : name).trim().toUpperCase().replace(/\.$/, '');
+  return MONTH_NAME_LOOKUP_ID_EN.has(key) ? MONTH_NAME_LOOKUP_ID_EN.get(key) : null;
+}
+// Hari terakhir bulan, sadar tahun kabisat (Date.UTC dengan day 0 bulan berikutnya).
+function lastDayOfMonthIso(periodKey) {
+  const key = normalizePeriodKeyValue(periodKey);
+  if (!key) return '';
+  const year = Number(key.slice(0, 4)), month = Number(key.slice(5, 7));
+  const date = new Date(Date.UTC(year, month, 0));
+  return normalizeExactCutoffDate(`${key}-${String(date.getUTCDate()).padStart(2, '0')}`);
+}
+function isLastDayOfMonthIso(value) {
+  const iso = normalizeExactCutoffDate(value);
+  if (!iso) return false;
+  return iso === lastDayOfMonthIso(iso.slice(0, 7));
+}
+// Penanda STATUS / label pada baris metadata. Teks seperti "CLOSING" adalah penanda jenis data,
+// BUKAN tanggal yang rusak, jadi tidak boleh memblokir upload — pembacaan lanjut ke sel berikutnya
+// dan, bila tidak ada tanggal sama sekali, jatuh ke input manual.
+const CUTOFF_METADATA_TEXT_MARKERS = new Set([
+  'CLOSING', 'CLOSING DATA', 'MTD', 'FINAL', 'CUT OFF DATA', 'CUT OFF', 'CUTOFF',
+  'TANGGAL', 'TANGGAL CUT OFF', 'TANGGAL CLOSING', 'PERIODE', 'N/A', 'NA', 'NIL', '-', '--', '–', '—'
+]);
+// true bila isi sel hanya teks tanpa angka sama sekali -> tidak mungkin tanggal yang salah tulis.
+function isNonDateMarkerText(text) {
+  const normalized = normalizeHeaderText(text);
+  if (!normalized) return true;
+  if (CUTOFF_METADATA_TEXT_MARKERS.has(normalized)) return true;
+  return !/\d/.test(normalized);
+}
+/* Penanda JENIS DATA yang EKSPLISIT pada baris metadata CUT OFF DATA.
+   Hanya teks di daftar ini yang dianggap deklarasi status. "FINAL", tanggal akhir bulan,
+   TAT 100%, dan nama file TIDAK PERNAH dianggap sebagai deklarasi Closing. */
+const CUTOFF_STATUS_MARKER_CLOSING = new Set(['CLOSING', 'CLOSING DATA']);
+const CUTOFF_STATUS_MARKER_MTD = new Set(['MTD', 'MTD DATA']);
+function readWorkbookCutoffMetadata(sheet, rows, startRow) {
+  const from = Number.isFinite(Number(startRow)) ? Math.max(0, Number(startRow)) : 0;
+  const maxRows = Math.min(Array.isArray(rows) ? rows.length : 0, from + 8);
   let metadataFound = false;
   let invalidSourceCell = null;
-  for (let r = 0; r < maxRows; r++) {
+  let invalidRawText = '';
+  let cutoffDate = null;
+  let cutoffSourceCell = null;
+  let closingMarkerCell = null;
+  let mtdMarkerCell = null;
+  for (let r = from; r < maxRows; r++) {
     const row = rows[r] || [];
     for (let c = 0; c < row.length; c++) {
       if (normalizeHeaderText(row[c]) !== 'CUT OFF DATA') continue;
       metadataFound = true;
-      for (let offset = 1; offset <= 3; offset++) {
+      // r / c di sini sudah koordinat FISIK worksheet (rows dinormalisasi oleh
+      // sheetRowsAlignedToWorksheet), sehingga encode_cell menghasilkan alamat yang benar
+      // untuk sheet yang dimulai di A1, C1, F1, maupun di mana saja.
+      // Pemindaian TIDAK dihentikan ketika tanggal valid sudah ditemukan, supaya tanggal dan
+      // penanda status dapat dipertahankan bersama-sama (mis. J1 = CLOSING, L1 = 31/05/2026).
+      for (let offset = 1; offset <= 4; offset++) {
         const address = XLSX.utils.encode_cell({ r, c: c + offset });
         const cell = sheet && sheet[address];
+        if (cell && cell.t === 'e') continue; // cell error -> jangan diperlakukan sebagai tanggal rusak maupun tanggal valid
         const date = excelDateValueToIso(cell && cell.v, cell && cell.w);
-        if (date) return { cutoffDate: date, sourceCell: address, metadataFound: true, invalid: false };
+        if (date) {
+          if (!cutoffDate) { cutoffDate = date; cutoffSourceCell = address; } // tanggal valid pertama yang menang
+          continue;
+        }
         const rawValue = cell && (cell.v !== null && cell.v !== undefined && String(cell.v).trim() !== '' ? cell.v : cell.w);
-        if (rawValue !== null && rawValue !== undefined && String(rawValue).trim() !== '' && !invalidSourceCell) invalidSourceCell = address;
+        const rawText = rawValue === null || rawValue === undefined ? '' : String(rawValue).trim();
+        if (!rawText) continue;                     // sel kosong -> lanjut ke sel berikutnya
+        const normalized = normalizeHeaderText(rawText);
+        // Deteksi status dibatasi pada area metadata di kanan label CUT OFF DATA, memakai
+        // koordinat fisik. Header dan baris data Salesman tidak pernah terjangkau di sini.
+        if (CUTOFF_STATUS_MARKER_CLOSING.has(normalized)) { if (!closingMarkerCell) closingMarkerCell = address; continue; }
+        if (CUTOFF_STATUS_MARKER_MTD.has(normalized)) { if (!mtdMarkerCell) mtdMarkerCell = address; continue; }
+        if (isNonDateMarkerText(rawText)) continue; // label/penanda lain -> bukan tanggal rusak
+        if (!invalidSourceCell) { invalidSourceCell = address; invalidRawText = rawText; }
       }
     }
   }
-  // Label tanpa value diperlakukan unavailable (manual fallback). Value ada tetapi tidak valid diblokir.
-  return { cutoffDate: null, sourceCell: invalidSourceCell, metadataFound, invalid: !!invalidSourceCell };
+  const statusConflict = !!closingMarkerCell && !!mtdMarkerCell;
+  const declaredStatus = statusConflict ? null : (closingMarkerCell ? PERIOD_STATUS_CLOSING : (mtdMarkerCell ? PERIOD_STATUS_MTD : null));
+  // Label tanpa value, value berupa penanda status (mis. "CLOSING"), atau label tidak ditemukan
+  // => unavailable (input manual). Value yang jelas DIMAKSUDKAN sebagai tanggal tetapi tidak dapat
+  // dibaca => invalid (upload diblokir, tanggal tidak ditebak). Invalid hanya dilaporkan bila
+  // TIDAK ada tanggal valid sama sekali pada area metadata.
+  const invalid = !cutoffDate && !!invalidSourceCell;
+  return {
+    cutoffDate,
+    sourceCell: cutoffDate ? cutoffSourceCell : invalidSourceCell,
+    metadataFound, invalid, invalidRawText: invalid ? invalidRawText : '',
+    declaredStatus, statusSourceCell: closingMarkerCell || mtdMarkerCell || null,
+    statusConflict, closingMarkerCell, mtdMarkerCell
+  };
 }
 function parseExcelWorkbook(arrayBuffer, options = {}) {
   const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: false });
   const sheetName = findTargetSheet(workbook);
   const sheet = workbook.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null });
-  const rowsFormatted = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: null }); // .w / tampilan asli sel, untuk Kode Depo
-  const cutoffMetadata = readWorkbookCutoffMetadata(sheet, rows);
+  const sheetOrigin = worksheetOrigin(sheet);
+  const rows = sheetRowsAlignedToWorksheet(sheet, { raw: true });
+  const rowsFormatted = sheetRowsAlignedToWorksheet(sheet, { raw: false }); // .w / tampilan asli sel, untuk Kode Depo
+  const cutoffMetadata = readWorkbookCutoffMetadata(sheet, rows, sheetOrigin.r);
+  // Dua penanda jenis data yang sama-sama eksplisit -> tidak dipilih salah satu secara diam-diam.
+  if (cutoffMetadata.statusConflict) {
+    throw new ParseError(`Metadata jenis data pada workbook saling bertentangan: penanda CLOSING pada cell ${cutoffMetadata.closingMarkerCell} dan penanda MTD pada cell ${cutoffMetadata.mtdMarkerCell}. Perbaiki metadata workbook sebelum upload.`);
+  }
   if (cutoffMetadata.invalid) {
-    throw new ParseError(`CUT OFF DATA workbook pada cell ${cutoffMetadata.sourceCell} tersedia tetapi nilainya tidak dapat dibaca sebagai tanggal kalender yang valid. Perbaiki metadata workbook; tanggal tidak akan ditebak.`);
+    const rawDetail = cutoffMetadata.invalidRawText ? ` (isi sel: "${cutoffMetadata.invalidRawText}")` : '';
+    throw new ParseError(`CUT OFF DATA workbook pada cell ${cutoffMetadata.sourceCell} tersedia tetapi nilainya tidak dapat dibaca sebagai tanggal kalender yang valid${rawDetail}. Perbaiki metadata workbook; tanggal tidak akan ditebak.`);
   }
   const detectedPeriodKey = periodKeyFromCutoffDate(cutoffMetadata.cutoffDate);
   const requestedPeriodKey = normalizePeriodKeyValue(options.periodKey);
@@ -3249,7 +3447,7 @@ function parseExcelWorkbook(arrayBuffer, options = {}) {
     throw new ParseError(`Cut-off tidak sesuai dengan CUT OFF DATA pada workbook (${fmtDateId(cutoffMetadata.cutoffDate)}).`);
   }
 
-  const headerRowIdx = findHeaderRowIndex(rows);
+  const headerRowIdx = findHeaderRowIndex(rows, sheetOrigin.r);
   if (headerRowIdx === -1) {
     throw new ParseError(`Header "Kode Salesman" tidak ditemukan pada sheet "${sheetName}". Pastikan struktur file sesuai template.`);
   }
@@ -3267,7 +3465,18 @@ function parseExcelWorkbook(arrayBuffer, options = {}) {
     throw new ParseError(`Kolom identitas required tidak ditemukan: ${missingIdentityHeaders.map(field => field.label).join(', ')}. Periksa header pada sheet "${sheetName}".`);
   }
   const unsatisfiedAlternativeGroups = (sourceRequirements.alternativeGroups || []).filter(group => !group.satisfied);
-  if (sourceRequirements.requiredMissing.length || unsatisfiedAlternativeGroups.length) {
+  /* PENUNDAAN VALIDASI REQUIRED KPI — HANYA pada parsing tahap awal ketika periode benar-benar
+     belum diketahui (workbook tidak menyediakan CUT OFF DATA dan Admin belum mengisi tanggal).
+     Pada kondisi itu `settings` di atas ter-resolve ke konfigurasi legacy/default, sehingga daftar
+     KPI aktif belum tentu milik periode workbook ini; menolak file di sini akan memblokir Closing
+     historis sebelum Admin punya kesempatan mengisi tanggal manual.
+     Validasi TIDAK dilonggarkan secara permanen: refreshUploadPreviewParser() memanggil ulang
+     parser TANPA flag ini setelah periode diketahui, dan seluruh jalur simpan/publish tetap
+     diblokir selama periode belum valid (buildUploadPreflight + confirmSaveSnapshot).
+     Header identitas required, metadata tanggal invalid, header tidak ditemukan, dan workbook
+     rusak tetap ditolak di tahap awal. */
+  const sourceRequirementCheckDeferred = options.deferSourceRequirementCheck === true && !parserPeriodKey;
+  if (!sourceRequirementCheckDeferred && (sourceRequirements.requiredMissing.length || unsatisfiedAlternativeGroups.length)) {
     const messages = [];
     if (sourceRequirements.requiredMissing.length) messages.push(`Kolom required KPI aktif tidak ditemukan: ${sourceRequirements.requiredMissing.map(sourceFieldLabel).join(', ')}`);
     unsatisfiedAlternativeGroups.forEach(group => messages.push(`${group.kpiLabel} membutuhkan minimal salah satu source: ${group.fields.map(sourceFieldLabel).join(' atau ')}`));
@@ -3306,14 +3515,22 @@ function parseExcelWorkbook(arrayBuffer, options = {}) {
     rec.namaSalesman = rec.namaSalesmanAktif;
     rawRecords.push(rec);
   }
-  // HK MTD dibaca langsung dari cell G2 sheet yang sama (bukan dari baris data Salesman).
-  const workdayMtd = readWorkdayMtdFromSheet(sheet, rows);
+  // HK MTD dibaca dari cell kanonik G2 sheet yang sama (bukan dari baris data Salesman); bila G2
+  // tidak berisi bilangan bulat 1–31, pembacaan jatuh ke label HK yang didukung pada baris metadata.
+  const workdayDetail = readWorkdayMtdDetailFromSheet(sheet, rows, sheetOrigin.r);
+  const workdayMtd = workdayDetail.value;
   return {
     sheetName, headerRowIndex: headerRowIdx, dataStartRow: dataStart + 1, colIndexMap, matchedByName, notFound, fallbackUsed,
     sourceRequirements, rawRecords, skippedTemplateRows, skippedEmptyRows,
     sourceRowsAfterHeader: Math.max(0, rows.length - dataStart), totalRowsScanned: rows.length, workdayMtd,
+    workdaySourceCell: workdayDetail.sourceCell, workdaySourceLabel: workdayDetail.sourceLabel, workdayResolution: workdayDetail.resolution,
+    sourceRequirementCheckDeferred,
+    sheetOriginRow: sheetOrigin.r, sheetOriginCol: sheetOrigin.c,
     detectedCutoffDate: cutoffMetadata.cutoffDate, cutoffSourceCell: cutoffMetadata.sourceCell,
-    cutoffMetadataFound: cutoffMetadata.metadataFound, cutoffMetadataInvalid: cutoffMetadata.invalid, detectedPeriodKey
+    cutoffMetadataFound: cutoffMetadata.metadataFound, cutoffMetadataInvalid: cutoffMetadata.invalid, detectedPeriodKey,
+    // Jenis data yang DIDEKLARASIKAN workbook (hanya dari penanda eksplisit pada metadata).
+    workbookDeclaredStatus: cutoffMetadata.declaredStatus,
+    workbookStatusSourceCell: cutoffMetadata.statusSourceCell
   };
 }
 
@@ -7529,6 +7746,10 @@ function router() {
   State.pageAbortController = new AbortController();
   State.pageSignal = State.pageAbortController.signal;
   let { path, params } = parseHash();
+  // Meninggalkan halaman Upload Data Baru membatalkan proses upload Excel yang masih berjalan,
+  // supaya hasil parsing lama tidak memunculkan kembali kandidat setelah halaman berganti.
+  // Hanya token upload yang dinaikkan — state/UI halaman lain tidak disentuh.
+  if (!(path === '/upload' && (params.get('tab') || 'baru') === 'baru')) { uploadCandidateToken++; releaseUploadLoading(); }
   const cohortSync = syncCohortContextFromRoute(path, params);
   if (cohortSync.invalid) {
     State.activeCohortId = null;
@@ -12339,7 +12560,10 @@ function renderUploadBaruTab() {
         <p class="dropzone-hint">Format .xlsx atau .xls</p>
       </div>
       <div class="upload-form-row">
-        <label>Tanggal / Cut-off Data:<input type="date" id="cutoff-date-input" value="${new Date().toISOString().slice(0, 10)}" /></label>
+        <!-- TIDAK ADA default tanggal. Tanggal hari ini / tanggal file sebelumnya tidak boleh
+             pernah menjadi periode upload secara tidak sengaja. Field hanya terisi oleh
+             CUT OFF DATA workbook (locked) atau oleh input manual Admin yang eksplisit. -->
+        <label>Tanggal / Cut-off Data:<input type="date" id="cutoff-date-input" value="" /></label>
         <!-- PERIODE selalu diturunkan dari cut-off date, TIDAK PERNAH dari bulan browser,
              agar backfill bulan lama tidak salah label. Field ini read-only sebagai konfirmasi. -->
         <label>Periode (YYYY-MM):<input type="month" id="period-month-input" readonly title="Periode mengikuti Tanggal / Cut-off Data" /></label>
@@ -12390,7 +12614,22 @@ function uploadPeriodStatusValue() {
   const el = document.getElementById('period-status-input');
   return normalizePeriodStatusValue(el && el.value) || PERIOD_STATUS_MTD;
 }
-function syncWorkbookCutoffField(parsed) {
+/* Jenis data yang dideklarasikan workbook kandidat aktif. Sumbernya HANYA metadata Excel
+   hasil parsing (bukan dropdown, bukan nama file, bukan TAT, bukan tanggal akhir bulan). */
+function uploadCandidateDeclaredStatus(up) {
+  const candidate = up === undefined ? State.uploadPreview : up;
+  return normalizePeriodStatusValue(candidate && candidate.parsed && candidate.parsed.workbookDeclaredStatus);
+}
+function uploadCandidateDeclaredStatusCell(up) {
+  const candidate = up === undefined ? State.uploadPreview : up;
+  return (candidate && candidate.parsed && candidate.parsed.workbookStatusSourceCell) || '';
+}
+// options.resetManual = true dipakai saat KONTEKS UPLOAD BARU (file baru dipilih / kandidat
+// dibuang). Saat itu field tanggal benar-benar dikosongkan sehingga tanggal dari file
+// sebelumnya, tanggal hari ini, maupun tanggal snapshot aktif tidak mungkin terbawa.
+// options.resetManual = false dipakai saat re-render halaman: tanggal manual yang sudah
+// diisi Admin untuk kandidat yang sama dipulihkan, bukan dihapus.
+function syncWorkbookCutoffField(parsed, options = {}) {
   const cutoffEl = document.getElementById('cutoff-date-input');
   const hintEl = document.getElementById('cutoff-source-hint');
   if (!cutoffEl) return;
@@ -12407,15 +12646,75 @@ function syncWorkbookCutoffField(parsed) {
   } else {
     cutoffEl.removeAttribute('aria-readonly');
     cutoffEl.title = 'Isi manual karena CUT OFF DATA valid tidak tersedia pada workbook';
+    // WAJIB dikosongkan: tanpa ini, tanggal workbook sebelumnya (mis. 31 Mei) tetap
+    // tertinggal di field dan data bulan lain bisa tersimpan ke periode yang salah.
+    const candidate = State.uploadPreview;
+    const restored = options.resetManual === false && candidate && candidate.parsed === parsed
+      ? (normalizeExactCutoffDate(candidate.manualCutoffDate) || '')
+      : '';
+    cutoffEl.value = restored;
     if (hintEl) {
-      hintEl.className = 'upload-period-hint';
-      hintEl.textContent = parsed ? 'CUT OFF DATA valid tidak tersedia pada workbook. Tanggal dapat diisi manual.' : '';
+      hintEl.className = 'upload-period-hint warn';
+      hintEl.textContent = parsed ? 'Tanggal CUT OFF tidak tersedia pada workbook. Silakan isi tanggal Closing secara manual.' : '';
     }
   }
 }
-function clearUploadCandidate() {
+/* Membuang SELURUH konteks kandidat upload sebelumnya (kandidat, tanggal, periode hasil
+   parsing, signature konfigurasi KPI, status validasi, blocker, dan area preview).
+   TIDAK menyentuh snapshot historis di IndexedDB maupun State.snapshotList. */
+function resetUploadCandidateContext() {
+  // Menaikkan token = membatalkan SELURUH proses upload asynchronous yang masih berjalan.
+  // Dipakai saat file baru dipilih, kandidat dibatalkan, dan saat meninggalkan halaman Upload,
+  // supaya proses lama tidak dapat memunculkan kembali kandidat yang sudah dibatalkan.
+  const token = ++uploadCandidateToken;
+  releaseUploadLoading();
   State.uploadPreview = null;
-  syncWorkbookCutoffField(null);
+  const cutoffEl = document.getElementById('cutoff-date-input');
+  if (cutoffEl) { cutoffEl.readOnly = false; cutoffEl.removeAttribute('aria-readonly'); cutoffEl.value = ''; }
+  const monthEl = document.getElementById('period-month-input');
+  if (monthEl) monthEl.value = '';
+  // Kunci jenis data milik workbook sebelumnya DILEPAS dan pilihannya dikembalikan ke default,
+  // supaya status tidak terbawa ke file berikutnya. syncUploadPeriodFields() di bawah akan
+  // menerapkan kembali kunci yang masih berlaku (periode yang sudah Closing / metadata baru).
+  const statusEl = document.getElementById('period-status-input');
+  if (statusEl) {
+    const mtdOption = statusEl.querySelector('option[value="MTD"]');
+    if (mtdOption) mtdOption.disabled = false;
+    statusEl.value = PERIOD_STATUS_MTD;
+  }
+  const previewArea = document.getElementById('upload-preview-area');
+  if (previewArea) previewArea.innerHTML = '';
+  syncWorkbookCutoffField(null, { resetManual: true });
+  syncUploadPeriodFields();
+  return token;
+}
+/* Lifecycle loading overlay & notifikasi KHUSUS upload Excel. Sistem loading global aplikasi
+   tidak diubah — ini hanya pembungkus yang menolak efek dari token yang sudah kedaluwarsa,
+   sehingga proses lama tidak dapat menutup overlay / menimpa toast milik proses terbaru. */
+let uploadLoadingOwnerToken = 0;
+function isActiveUploadToken(token) { return token === uploadCandidateToken; }
+function showUploadLoading(token, text) {
+  if (!isActiveUploadToken(token)) return;
+  uploadLoadingOwnerToken = token; // kepemilikan overlay dipegang proses upload aktif
+  showLoadingOverlay(text);
+}
+// Hanya PEMILIK overlay yang boleh menutupnya. Proses upload lama tidak dapat menutup overlay
+// milik proses terbaru, dan proses terbaru tidak kehilangan kemampuan menutup overlaynya sendiri.
+function hideUploadLoading(token) {
+  if (uploadLoadingOwnerToken !== token) return;
+  uploadLoadingOwnerToken = 0;
+  hideLoadingOverlay();
+}
+// Dipakai saat upload dibatalkan / halaman Upload ditinggalkan: overlay milik upload yang
+// dibatalkan dilepas agar tidak tertinggal di layar. Overlay operasi lain tidak disentuh.
+function releaseUploadLoading() {
+  if (!uploadLoadingOwnerToken) return;
+  uploadLoadingOwnerToken = 0;
+  hideLoadingOverlay();
+}
+function showUploadToast(token, message, type) { if (isActiveUploadToken(token)) showToast(message, type); }
+function clearUploadCandidate() {
+  resetUploadCandidateContext();
   const fileInput = document.getElementById('file-input');
   if (fileInput) fileInput.value = '';
 }
@@ -12435,10 +12734,24 @@ function syncUploadPeriodFields() {
   const periodKey = periodKeyFromCutoffDate(cutoffEl.value);
   monthEl.value = periodKey;
   const mtdOption = statusEl.querySelector('option[value="MTD"]');
-  const locked = !!periodKey && periodIsAlreadyClosing(periodKey);
+  // Kunci jenis data berasal dari DUA sumber independen:
+  //  - periodenya sudah Closing (aturan existing), atau
+  //  - workbook kandidat aktif mendeklarasikan CLOSING secara eksplisit pada metadata.
+  const declaredStatus = uploadCandidateDeclaredStatus();
+  const declaredClosing = declaredStatus === PERIOD_STATUS_CLOSING;
+  const locked = (!!periodKey && periodIsAlreadyClosing(periodKey)) || declaredClosing;
   if (mtdOption) mtdOption.disabled = locked;
   if (locked && normalizePeriodStatusValue(statusEl.value) === PERIOD_STATUS_MTD) statusEl.value = PERIOD_STATUS_CLOSING;
   if (!hintEl) return;
+  // Pesan kunci dari metadata workbook diprioritaskan karena menjelaskan mengapa MTD mati,
+  // termasuk ketika periode belum dapat ditentukan (tanggal manual belum diisi).
+  if (declaredClosing && !(periodKey && periodIsAlreadyClosing(periodKey))) {
+    const cell = uploadCandidateDeclaredStatusCell();
+    hintEl.className = 'upload-period-hint warn';
+    hintEl.textContent = `Workbook terdeteksi sebagai CLOSING. Jenis data dikunci ke Closing sesuai metadata Excel${cell ? ` (${cell})` : ''}.`
+      + (periodKey ? ` Periode ${periodMonthLabel(periodKey)} akan disimpan sebagai Closing — TAT pada file sumber wajib 100%.` : '');
+    return;
+  }
   if (!periodKey) {
     hintEl.className = 'upload-period-hint warn';
     hintEl.textContent = 'Tanggal / Cut-off Data belum valid, sehingga periode belum dapat ditentukan.';
@@ -12462,9 +12775,14 @@ function syncUploadPeriodFields() {
 function wireUploadPeriodFields() {
   const cutoffEl = document.getElementById('cutoff-date-input');
   const statusEl = document.getElementById('period-status-input');
-  if (cutoffEl) cutoffEl.addEventListener('change', () => { syncUploadPeriodFields(); renderUploadPreview(); });
+  if (cutoffEl) cutoffEl.addEventListener('change', () => {
+    // Tanggal manual disimpan pada kandidat yang sedang diproses saja, supaya re-render
+    // halaman tidak menghapusnya dan pemilihan file baru tidak mewarisinya.
+    if (!cutoffEl.readOnly && State.uploadPreview) State.uploadPreview.manualCutoffDate = normalizeExactCutoffDate(cutoffEl.value) || '';
+    syncUploadPeriodFields(); renderUploadPreview();
+  });
   if (statusEl) statusEl.addEventListener('change', () => { syncUploadPeriodFields(); renderUploadPreview(); });
-  syncWorkbookCutoffField(State.uploadPreview && State.uploadPreview.parsed);
+  syncWorkbookCutoffField(State.uploadPreview && State.uploadPreview.parsed, { resetManual: false });
   // Daftar periode resmi dibutuhkan untuk mengunci MTD setelah Closing.
   refreshOfficialPeriods().then(syncUploadPeriodFields).catch(() => syncUploadPeriodFields());
   syncUploadPeriodFields();
@@ -12549,38 +12867,62 @@ function setActiveMasterCabangInState(record) {
   State.masterCabangVersion++;
 }
 
+// Token pemilihan file. Hanya hasil dari pemilihan TERAKHIR yang boleh menulis ke State:
+// bila Admin memilih file baru saat file sebelumnya masih diproses, hasil proses lama
+// dibuang dan tidak dapat menimpa (atau tersimpan sebagai) kandidat file terbaru.
+let uploadCandidateToken = 0;
 async function handleFileSelected(file) {
   if (!requireAdmin('mengunggah Excel')) return;
   const previewArea = document.getElementById('upload-preview-area');
-  showLoadingOverlay('Membaca file Excel...');
+  // KONTEKS UPLOAD BARU: kandidat, tanggal, periode, signature KPI, validasi, dan blocker
+  // file sebelumnya dibuang SEBELUM parsing. Tidak ada nilai yang terbawa Mei -> Juni -> dst.
+  const token = resetUploadCandidateContext();
+  showUploadLoading(token, 'Membaca file Excel...');
   try {
     const buffer = await file.arrayBuffer();
     await new Promise(r => setTimeout(r, 120)); // beri jeda agar overlay terlihat (file besar tetap responsif)
-    showLoadingOverlay('Mendeteksi sheet & header...');
-    const requestedPeriodKey = periodKeyFromCutoffDate((document.getElementById('cutoff-date-input') || {}).value);
-    const requestedCutoffDate = (document.getElementById('cutoff-date-input') || {}).value;
-    const parsed = parseExcelWorkbook(buffer, { periodKey: requestedPeriodKey, cutoffDate: requestedCutoffDate });
-    const periodKey = parsed.detectedPeriodKey || requestedPeriodKey;
-    if (!periodKey) throw new ParseError('Periode tidak dapat ditentukan dari CUT OFF DATA workbook maupun field Tanggal / Cut-off Data Admin.');
-    const parserSettings = withCurrentFormulaModel(resolvedKpiSettings(periodKey, { settings: State.settings }));
+    if (!isActiveUploadToken(token)) return; // file lain sudah dipilih -> hasil ini dibuang tanpa menyentuh UI
+    showUploadLoading(token, 'Mendeteksi sheet & header...');
+    // Field tanggal TIDAK dipakai sebagai fallback periode pada parsing awal: field sudah
+    // dikosongkan, dan tanggal file sebelumnya tidak boleh menentukan periode file ini.
+    // deferSourceRequirementCheck: validasi required KPI ditunda HANYA bila periode belum
+    // diketahui; validasi penuh dijalankan ulang setelah tanggal manual diisi.
+    const parsed = parseExcelWorkbook(buffer, { deferSourceRequirementCheck: true });
+    if (!isActiveUploadToken(token)) return;
+    // Periode hanya dari CUT OFF DATA workbook. Bila tidak ada, periode BELUM diketahui:
+    // file diterima sebagai kandidat untuk diperiksa, tetapi validasi berbasis periode
+    // belum final sampai Admin mengisi tanggal Closing secara manual.
+    const periodKey = parsed.detectedPeriodKey || '';
     if (parsed.rawRecords.length === 0) {
+      hideUploadLoading(token);
       clearUploadCandidate();
-      hideLoadingOverlay(); previewArea.innerHTML = `<div class="alert alert-error">Upload dibatalkan. Dataset kosong: tidak ditemukan baris data Salesman. Pastikan format sesuai template.</div>`; return;
+      previewArea.innerHTML = `<div class="alert alert-error">Upload dibatalkan. Dataset kosong: tidak ditemukan baris data Salesman. Pastikan format sesuai template.</div>`; return;
     }
-    showLoadingOverlay('Memvalidasi & menghitung KPI...');
+    showUploadLoading(token, 'Memvalidasi & menghitung KPI...');
     const dupInfo = detectDuplicates(parsed.rawRecords);
+    const parserSettings = periodKey ? withCurrentFormulaModel(resolvedKpiSettings(periodKey, { settings: State.settings })) : null;
+    if (!isActiveUploadToken(token)) return;
     State.uploadPreview = {
       file, buffer, parsed, dupInfo, resolution: dupInfo.duplicateCodes.length ? null : 'none',
-      parsedPeriodKey: periodKey,
-      parserConfigurationSignature: `${parserSettings.__kpiConfiguration.signature}~${formulaModelForSettings(parserSettings).signature}`
+      parsedPeriodKey: periodKey, manualCutoffDate: '', candidateToken: token,
+      // Signature kosong ketika periode belum diketahui -> refreshUploadPreviewParser WAJIB
+      // melakukan parse ulang dengan konfigurasi KPI periode yang benar setelah tanggal diisi.
+      parserConfigurationSignature: parserSettings
+        ? `${parserSettings.__kpiConfiguration.signature}~${formulaModelForSettings(parserSettings).signature}` : ''
     };
-    syncWorkbookCutoffField(parsed);
+    syncWorkbookCutoffField(parsed, { resetManual: true });
     syncUploadPeriodFields();
-    hideLoadingOverlay();
+    hideUploadLoading(token);
     renderUploadPreview();
-    showToast('File berhasil dibaca.', 'success');
+    if (periodKey) showUploadToast(token, 'File berhasil dibaca.', 'success');
+    else showUploadToast(token, 'File berhasil dibaca. Tanggal CUT OFF tidak tersedia — isi tanggal Closing secara manual.', 'info');
   } catch (err) {
-    console.error(err); clearUploadCandidate(); hideLoadingOverlay();
+    console.error(err);
+    // Proses yang sudah kedaluwarsa BERHENTI TOTAL: tidak menutup overlay, tidak menghapus
+    // kandidat, tidak menulis preview, dan tidak menampilkan toast milik proses terbaru.
+    if (!isActiveUploadToken(token)) return;
+    hideUploadLoading(token);
+    clearUploadCandidate();
     const fileInput = document.getElementById('file-input'); if (fileInput) fileInput.value = '';
     const message = err.message || 'Format file tidak dikenali.';
     previewArea.innerHTML = `<div class="alert alert-error"><strong>Upload dibatalkan.</strong> ${escapeHtml(message)}</div>`;
@@ -12664,13 +13006,34 @@ function buildUploadPreflight(periodKey, periodStatus, up, settings, validation,
   } catch (error) {
     blockers.push(error.message);
   }
+  // Tanggal Closing yang diisi MANUAL (karena workbook tidak menyediakan CUT OFF DATA) wajib
+  // tanggal kalender valid DAN hari terakhir bulan periode (sadar tahun kabisat). Tanggal yang
+  // berasal dari workbook tidak ikut aturan ini supaya perilaku upload existing tidak berubah.
+  const manualCutoffRaw = (document.getElementById('cutoff-date-input') || {}).value;
+  const workbookCutoffForManual = normalizeExactCutoffDate(parsed && parsed.detectedCutoffDate);
+  if (!workbookCutoffForManual && periodStatus === PERIOD_STATUS_CLOSING) {
+    const manualCutoff = normalizeExactCutoffDate(manualCutoffRaw);
+    if (!manualCutoff) {
+      blockers.push('Tanggal Closing manual belum berupa tanggal kalender yang valid.');
+    } else if (periodKey && manualCutoff.slice(0, 7) !== periodKey) {
+      blockers.push(`Tanggal Closing manual (${fmtDateId(manualCutoff)}) berada di luar periode ${periodMonthLabel(periodKey)}.`);
+    } else if (!isLastDayOfMonthIso(manualCutoff)) {
+      blockers.push(`Tanggal Closing manual wajib hari terakhir bulan periode (${fmtDateId(lastDayOfMonthIso(manualCutoff.slice(0, 7)))}), bukan ${fmtDateId(manualCutoff)}.`);
+    }
+  }
+  // SAVE GUARD METADATA: sumber kebenaran adalah metadata workbook hasil parsing, bukan dropdown.
+  // Berlaku walaupun nilai dropdown diubah paksa lewat Developer Tools.
+  if (uploadCandidateDeclaredStatus(up) === PERIOD_STATUS_CLOSING && periodStatus === PERIOD_STATUS_MTD) {
+    const cell = uploadCandidateDeclaredStatusCell(up);
+    blockers.push(`Workbook memiliki metadata CLOSING${cell ? ` (${cell})` : ''} sehingga tidak dapat disimpan sebagai MTD.`);
+  }
   if (!records.length) blockers.push('Dataset kosong: tidak ada baris Salesman yang dapat diproses.');
   if (!req || req.requiredMissing.length || unsatisfied.length) blockers.push('Struktur source belum memenuhi kolom required KPI aktif.');
   const configValidation = validateKpiConfiguration(settings && settings.__kpiConfiguration ? settings.__kpiConfiguration : settings);
   if (!configValidation.valid) blockers.push(`Konfigurasi KPI tidak valid: ${configValidation.message}`);
   if (!tatValidation || !tatValidation.valid) blockers.push(tatValidationMessage(tatValidation));
   if (periodStatus === PERIOD_STATUS_MTD && !isValidWorkdayMtdValue(parsed && parsed.workdayMtd)) {
-    blockers.push(`Data MTD memerlukan HK valid > 0 dari ${parsed ? parsed.sheetName : APP_CONFIG.SHEET_NAME}!${WORKDAY_MTD_CELL} (bilangan bulat 1–31).`);
+    blockers.push(`Data MTD memerlukan HK valid > 0 dari ${parsed ? parsed.sheetName : APP_CONFIG.SHEET_NAME}!${(parsed && parsed.workdaySourceCell) || WORKDAY_MTD_CELL} (bilangan bulat 1–31).`);
   }
   if (periodStatus === PERIOD_STATUS_CLOSING && (!tatValidation || !tatValidation.valid || !isClosingTatValue(tatValidation.tatMtd))) {
     blockers.push('Data Closing wajib memiliki TAT 100% dari file sumber.');
@@ -12685,7 +13048,9 @@ function renderUploadPreview() {
   if (!up) { previewArea.innerHTML = ''; return; }
   const previewPeriodKey = periodKeyFromCutoffDate((document.getElementById('cutoff-date-input') || {}).value);
   if (!previewPeriodKey) {
-    previewArea.innerHTML = '<div class="alert alert-error"><strong>Upload dibatalkan.</strong> Periode tidak dapat ditentukan. Isi Tanggal / Cut-off Data yang valid.</div>';
+    // Kandidat TETAP dipertahankan: file sudah terbaca, hanya periodenya belum ditentukan.
+    // Tidak ada validasi berbasis periode yang dijalankan dan Simpan tetap diblokir.
+    previewArea.innerHTML = '<div class="alert alert-warn"><strong>Menunggu tanggal Closing.</strong> Tanggal CUT OFF tidak tersedia pada workbook. Silakan isi tanggal Closing secara manual (hari terakhir bulan periode) untuk melanjutkan pemeriksaan.</div>';
     return;
   }
   const previewSettings = withCurrentFormulaModel(resolvedKpiSettings(previewPeriodKey, { settings: State.settings }));
@@ -12822,7 +13187,7 @@ function renderUploadPreview() {
         </div>` : ''}
         <div class="v-item ${isValidWorkdayMtdValue(up.parsed.workdayMtd) ? 'ok' : 'warn'}">
           Hari Kerja (HK) MTD: <strong>${isValidWorkdayMtdValue(up.parsed.workdayMtd) ? `${fmtNumber(up.parsed.workdayMtd, 0)} HK` : 'Tidak valid'}</strong>
-          <div class="v-detail">Sumber: sheet ${escapeHtml(up.parsed.sheetName)} cell ${WORKDAY_MTD_CELL} • ${isValidWorkdayMtdValue(up.parsed.workdayMtd) ? 'Nilai terbaca sebagai bilangan bulat 1–31.' : 'Nilai G2 kosong/bukan bilangan bulat 1–31. HK disimpan kosong dan ditampilkan "- HK" (tidak dikarang).'}</div>
+          <div class="v-detail">Sumber: sheet ${escapeHtml(up.parsed.sheetName)} cell ${escapeHtml(up.parsed.workdaySourceCell || WORKDAY_MTD_CELL)}${up.parsed.workdaySourceLabel ? ` (label "${escapeHtml(up.parsed.workdaySourceLabel)}")` : ''} • ${isValidWorkdayMtdValue(up.parsed.workdayMtd) ? 'Nilai terbaca sebagai bilangan bulat 1–31.' : `Nilai ${escapeHtml(WORKDAY_MTD_CELL)} kosong/bukan bilangan bulat 1–31 dan label HK yang didukung tidak ditemukan. HK disimpan kosong dan ditampilkan "- HK" (tidak dikarang).`}</div>
         </div>
         <div class="v-item ${tatValidation.valid ? 'ok' : 'warn'}">
           TAT MTD: <strong>${tatValidation.valid ? fmtPercent(tatValidation.tatMtd) : 'Tidak valid'}</strong>
@@ -12907,6 +13272,13 @@ async function confirmSaveSnapshot() {
   const periodKey = periodKeyFromCutoffDate(cutoffDate);
   if (!periodKey) { showToast('Tanggal / Cut-off Data belum valid sehingga periode tidak dapat ditentukan.', 'error'); return; }
   const periodStatus = uploadPeriodStatusValue();
+  // Guard kedua pada jalur penyimpanan: metadata workbook mengalahkan nilai dropdown.
+  if (uploadCandidateDeclaredStatus(up) === PERIOD_STATUS_CLOSING && periodStatus === PERIOD_STATUS_MTD) {
+    showToast('Upload dibatalkan. Workbook memiliki metadata CLOSING sehingga tidak dapat disimpan sebagai MTD.', 'error');
+    syncUploadPeriodFields();
+    renderUploadPreview();
+    return;
+  }
   // Preview, save, dan preflight kandidat upload memakai object context CURRENT yang sama.
   const periodKpiSettings = withCurrentFormulaModel(resolvedKpiSettings(periodKey, { settings: State.settings }));
   try {
@@ -12961,7 +13333,7 @@ async function confirmSaveSnapshot() {
       tatFormulaVersion: APP_CONFIG.CURRENT_TAT_FORMULA_VERSION,
       // HK MTD dari Detail persalesman!G2. null bila G2 tidak valid (UI menampilkan "- HK").
       workdayMtd: normalizeWorkdayMtdValue(up.parsed.workdayMtd),
-      workdaySourceCell: WORKDAY_MTD_CELL,
+      workdaySourceCell: up.parsed.workdaySourceCell || WORKDAY_MTD_CELL,
       // Local/unpublished snapshot sengaja tidak menyimpan config immutable.
       // Saat dibaca ulang, config selalu di-resolve dari assignment periode terbaru.
       kpiConfigurationSnapshot: null,
